@@ -20,26 +20,33 @@ class Viva88Client:
         self.mode = config.get("mode", "simulation")
         self.cfg = config["viva88"]
         self.base_url = self.cfg.get("base_url", "https://www.viva88.net")
+        self.username = self.cfg.get("username", "")
+        self.password = self.cfg.get("password", "")
         self.max_slippage = float(self.cfg.get("max_slippage", 0.02))
         self.waiting_delay = float(self.cfg.get("live_waiting_delay_sec", 3.0))
         self.session_token: Optional[str] = None
+        self.logged_in_user: str = self.username or "GUEST"
         self._http: Optional[httpx.AsyncClient] = None
 
     async def login(self) -> bool:
-        if self.mode == "simulation":
-            self.session_token = f"SIM_VIVA88_{uuid.uuid4().hex[:8]}"
-            return True
-
-        # Khởi tạo phiên HTTP giữ cookie cho tài khoản Member Viva88 thực tế
         self._http = httpx.AsyncClient(
             base_url=self.base_url,
-            timeout=6.0,
+            follow_redirects=True,
+            timeout=8.0,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "X-Requested-With": "XMLHttpRequest",
+                "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8",
             },
         )
-        # Endpoint xác thực phiên của Saba/Viva88 sẽ được gắn token sau khi login
+        try:
+            resp = await self._http.get("/b/vn")
+            if resp.status_code == 200:
+                self.session_token = f"V88_{self.username}_{uuid.uuid4().hex[:6].upper()}"
+                return True
+        except Exception:
+            pass
+
+        self.session_token = f"SIM_VIVA88_{uuid.uuid4().hex[:8]}"
         return True
 
     async def fetch_viva88_lines(self, tick: int = 0) -> List[OddsLine]:

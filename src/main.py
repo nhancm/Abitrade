@@ -46,9 +46,15 @@ def append_audit_jsonl(record: dict, path: str = "logs/audit_metrics.jsonl") -> 
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def load_config(path: str = "config/settings.yaml") -> dict:
+def load_config(path: str = "config/settings.yaml", secrets_path: str = "config/secrets.yaml") -> dict:
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    if os.path.exists(secrets_path):
+        with open(secrets_path, "r", encoding="utf-8") as sf:
+            secrets = yaml.safe_load(sf) or {}
+            if "viva88" in secrets:
+                cfg.setdefault("viva88", {}).update(secrets["viva88"])
+    return cfg
 
 
 def print_summary_table(risk_mgr: RiskManager, stats: dict) -> None:
@@ -107,13 +113,15 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
 
     await viva_client.login()
     logger.info(
-        f"START BOT | mode={cfg['mode']} | bankroll={risk_mgr.bankroll:.2f} | "
+        f"START BOT | mode={cfg['mode']} | account={viva_client.logged_in_user} | "
+        f"session={viva_client.session_token} | bankroll={risk_mgr.bankroll:.2f} | "
         f"min_win_prob={cfg['strategy']['min_win_prob']} | min_ev={cfg['strategy']['min_ev_percent']}%"
     )
 
     console.print(
         Panel.fit(
             f"[bold cyan]HỆ THỐNG AUTOBET 1 CỬA VIVA88 (CHẾ ĐỘ: {cfg['mode'].upper()})[/bold cyan]\n"
+            f"• Tài khoản Viva88: [bold yellow]{viva_client.logged_in_user}[/bold yellow] (Session: [green]{viva_client.session_token}[/green])\n"
             f"• Vốn hiện tại: [bold green]{risk_mgr.bankroll:,.2f}[/bold green] | "
             f"Điều kiện nổ kèo: [yellow]Winrate thực >= {cfg['strategy']['min_win_prob']*100:.0f}%[/yellow] & "
             f"[yellow]+EV >= {cfg['strategy']['min_ev_percent']}%[/yellow]\n"
