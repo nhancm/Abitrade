@@ -5,7 +5,7 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
-import signal
+import signal as os_signal
 import sys
 import yaml
 from rich.console import Console
@@ -135,14 +135,15 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
     )
 
     tick = 0
+    loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
 
     def _on_sigint(signum, frame):
-        stop_event.set()
+        loop.call_soon_threadsafe(stop_event.set)
 
-    signal.signal(signal.SIGINT, _on_sigint)
-    if hasattr(signal, "SIGBREAK"):
-        signal.signal(signal.SIGBREAK, _on_sigint)
+    os_signal.signal(os_signal.SIGINT, _on_sigint)
+    if hasattr(os_signal, "SIGBREAK"):
+        os_signal.signal(os_signal.SIGBREAK, _on_sigint)
 
     try:
         while not stop_event.is_set():
