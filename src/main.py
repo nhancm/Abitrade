@@ -177,7 +177,11 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
             skipped_locked = 0
 
             candidate_signals = []
+            near_miss_list = []
             for match_key, s_line, v_line in paired:
+                true_prob, _ = analyzer.devig_power(s_line.odds_dec, s_line.opposite_odds_dec)
+                ev_pct = round(((true_prob * v_line.odds_dec) - 1.0) * 100.0, 2)
+                near_miss_list.append((true_prob, ev_pct, v_line))
                 signal = analyzer.evaluate_pair(
                     sharp_line=s_line,
                     viva_line=v_line,
@@ -188,6 +192,15 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
                     skipped_low_ev += 1
                 else:
                     candidate_signals.append(signal)
+
+            if not candidate_signals and near_miss_list:
+                near_miss_list.sort(key=lambda x: x[0], reverse=True)
+                top_prob, top_ev, top_v = near_miss_list[0]
+                console.print(
+                    f"     [dim]🔎 Kèo sát ngưỡng nhất đang theo dõi: [{top_v.league}] {top_v.home_team} vs {top_v.away_team} "
+                    f"({top_v.minute} | {top_v.score_home}-{top_v.score_away}) -> {top_v.market_type.value} {top_v.side} {top_v.line} "
+                    f"| Winrate: {top_prob*100:.1f}% (Cần >= {cfg['strategy']['min_win_prob']*100:.1f}%) | EV: {top_ev:+.2f}%[/dim]"
+                )
 
             # Ưu tiên chọn kèo có lợi nhuận kỳ vọng (+EV%) cao nhất trước
             candidate_signals.sort(key=lambda s: s.ev_percent, reverse=True)
@@ -228,6 +241,26 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
 
             # BƯỚC 4: Cập nhật tỉ số trực tiếp & Chốt các vé đã kết thúc (FT hoặc nổ đủ Tài sớm)
             stats = risk_mgr.update_and_settle_real_tickets(viva_client.live_match_map)
+            for st_ticket in risk_mgr.newly_settled:
+                color = "green" if st_ticket.status.value in ("WON", "HALF_WON") else ("red" if "LOST" in st_ticket.status.value else "yellow")
+                logger.info(
+                    f"CYCLE #{tick+1} | TICKET_SETTLED | id={st_ticket.ticket_id} | {st_ticket.match_name} | "
+                    f"status={st_ticket.status.value} | score={st_ticket.current_score} | pnl={st_ticket.pnl:+.2f}"
+                )
+                console.print(
+                    f"     [bold {color}]🔔 [CHỐT KẾT QUẢ VÉ {st_ticket.ticket_id} -> {st_ticket.status.value}][/bold {color}] "
+                    f"[{st_ticket.league}] {st_ticket.match_name} ({st_ticket.current_minute} | Tỉ số {st_ticket.current_score} | Góc {st_ticket.current_corners}) | "
+                    f"Kèo: {st_ticket.market_type.value} {st_ticket.selection} (Lúc đặt: {st_ticket.score_at_bet}) | "
+                    f"Lãi/Lỗ: [bold {color}]{st_ticket.pnl:+,.2f} đ[/bold {color}] ({st_ticket.note})"
+                )
+
+            running_now_list = [t for t in risk_mgr.tickets if t.status.value == "RUNNING"]
+            if running_now_list:
+                brief = " ; ".join(
+                    f"{t.match_name.split(' vs ')[0]} ({t.current_minute} {t.current_score}, {t.selection})"
+                    for t in running_now_list[:4]
+                )
+                console.print(f"     [dim]📌 Đang canh {len(running_now_list)} vé RUNNING: {brief}[/dim]")
             logger.info(
                 f"CYCLE #{tick+1} | SUMMARY | saba_live={live_count} paired={len(paired)} new_bets={new_bets_this_tick} "
                 f"running={stats['running_count']} settled={stats['settled']} won={stats['won']} lost={stats['lost']} "

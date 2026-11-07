@@ -44,23 +44,23 @@ class SharpFeedClient:
             total_da = da_h + da_a
             total_sot = sot_h + sot_a
             elapsed = max(25, mt) if v.phase == MatchPhase.LIVE else 0
-            remaining_ratio = min(0.95, max(0.25, (90.0 - elapsed) / 65.0)) if v.phase == MatchPhase.LIVE else 1.0
 
             if v.market_type == MarketType.OU:
                 if v.phase == MatchPhase.LIVE:
-                    # Tính tốc độ tạo cơ hội nguy hiểm mỗi phút kết hợp hệ số thời gian còn lại
+                    # Vì mốc kèo Saba (ou_line) đã tự động hạ từ +1.5 (H1) xuống +1.0 / +0.75 (H2) theo phút,
+                    # ta tính trực tiếp áp lực tấn công mỗi phút (không phạt kép hệ số thời gian còn lại)
                     da_per_min = total_da / elapsed
                     sot_per_min = total_sot / elapsed
-                    pressure_score = ((da_per_min * 0.65) + (sot_per_min * 2.8)) * math.sqrt(remaining_ratio)
-                    true_prob = min(0.65, max(0.45, 0.45 + (pressure_score - 0.62) * 0.25))
+                    pressure_score = (da_per_min * 0.70) + (sot_per_min * 2.60)
+                    true_prob = min(0.66, max(0.45, 0.45 + (pressure_score - 0.50) * 0.30))
                 else:
                     true_prob = 0.50
 
             elif v.market_type == MarketType.CORNER_OU:
-                crn_per_min = (crn_h + crn_a) / max(12, elapsed)
-                da_per_min = total_da / max(12, elapsed)
-                corner_pressure = ((crn_per_min * 3.8) + (da_per_min * 0.4)) * math.sqrt(remaining_ratio)
-                true_prob = min(0.65, max(0.46, 0.46 + (corner_pressure - 0.68) * 0.22))
+                crn_per_min = (crn_h + crn_a) / max(25, elapsed)
+                da_per_min = total_da / max(25, elapsed)
+                corner_pressure = (crn_per_min * 3.8) + (da_per_min * 0.45)
+                true_prob = min(0.65, max(0.46, 0.46 + (corner_pressure - 0.60) * 0.24))
 
             elif v.market_type == MarketType.HDP:
                 if v.phase == MatchPhase.LIVE:
@@ -75,8 +75,8 @@ class SharpFeedClient:
                     else:
                         dom_da = (da_h - da_a) / max(25, elapsed)
                         dom_sot = (sot_h - sot_a) / max(25, elapsed)
-                        dom_score = (dom_da * 0.75 + dom_sot * 2.1) * math.sqrt(remaining_ratio)
-                        true_prob = min(0.64, max(0.45, 0.48 + dom_score * 0.28))
+                        dom_score = (dom_da * 0.75 + dom_sot * 2.2)
+                        true_prob = min(0.65, max(0.45, 0.48 + dom_score * 0.30))
                 else:
                     true_prob = 0.50
             else:

@@ -24,6 +24,7 @@ class RiskManager:
         self.ledger_path = ledger_path
         self.locked_markets: Set[str] = set()
         self.tickets: List[BetTicket] = []
+        self.newly_settled: List[BetTicket] = []
         self._load_ledger()
 
     def _load_ledger(self) -> None:
@@ -157,6 +158,7 @@ class RiskManager:
         - Nếu trận đấu chưa xong (`Status != 50`), giữ nguyên `RUNNING` (trừ khi kèo OVER đã đủ bàn ăn sớm).
         - Nếu trận đấu đã kết thúc (`Status == 50` - FT), tự động chấm Thắng/Thua và hoàn vốn + lãi về ví.
         """
+        self.newly_settled = []
         for t in self.tickets:
             if t.status != BetStatus.RUNNING:
                 continue
@@ -197,6 +199,7 @@ class RiskManager:
                 t.pnl = 0.0
                 self.bankroll += t.stake
                 t.note = "Hoàn tiền PUSH (Trọng tài VAR hủy bàn thắng lúc đặt vé)"
+                self.newly_settled.append(t)
                 continue
 
             # Kiểm tra điều kiện ăn sớm (Early Settlement) cho cửa OVER ngay trong trận
@@ -212,6 +215,7 @@ class RiskManager:
                 t.pnl = 0.0
                 self.bankroll += t.stake
                 t.note = "Hoàn tiền (Trận đấu hoãn/hủy)"
+                self.newly_settled.append(t)
                 continue
 
             # Chỉ kết toán khi trận đấu đã FT (Status == 50) hoặc cửa OVER đã nổ đủ bàn ăn sớm
@@ -239,6 +243,7 @@ class RiskManager:
             # Hoàn lại tiền gốc + Lãi/Lỗ vào số dư khả dụng
             self.bankroll += (t.stake + pnl)
             t.note = "Nổ Tài sớm ngay trong trận!" if (early_over_win and st != 50) else "Đã kết toán FT (Hết trận)"
+            self.newly_settled.append(t)
 
         self.save_ledger()
         return self.get_portfolio_stats()
