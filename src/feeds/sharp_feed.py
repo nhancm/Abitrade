@@ -43,35 +43,37 @@ class SharpFeedClient:
 
             total_da = da_h + da_a
             total_sot = sot_h + sot_a
-            elapsed = max(10, mt) if v.phase == MatchPhase.LIVE else 0
+            elapsed = max(12, mt) if v.phase == MatchPhase.LIVE else 0
+            remaining_ratio = max(0.20, (92.0 - elapsed) / 78.0) if v.phase == MatchPhase.LIVE else 1.0
 
             if v.market_type == MarketType.OU:
                 if v.phase == MatchPhase.LIVE:
-                    # Tính tốc độ tạo cơ hội nguy hiểm mỗi phút (Pressure Index)
+                    # Tính tốc độ tạo cơ hội nguy hiểm mỗi phút kết hợp hệ số thời gian còn lại
                     da_per_min = total_da / elapsed
                     sot_per_min = total_sot / elapsed
-                    pressure_score = (da_per_min * 0.7) + (sot_per_min * 2.5)
-                    # Nếu trận đấu đang có tốc độ tấn công dồn dập (pressure_score >= 0.85), xác suất nổ thêm bàn thắng rất cao (~60% - 66%)
-                    true_prob = min(0.67, max(0.46, 0.45 + (pressure_score - 0.55) * 0.28))
+                    pressure_score = ((da_per_min * 0.7) + (sot_per_min * 2.5)) * math.sqrt(remaining_ratio)
+                    true_prob = min(0.66, max(0.45, 0.45 + (pressure_score - 0.52) * 0.28))
                 else:
-                    # Với trận Pre-match, chỉ lọc những giải/trận có chỉ số cơ sở cao (dựa theo SortNumber/IsMain)
                     is_high_scoring = (int(m.get("MatchId", 0)) % 7 == 0)
                     true_prob = 0.61 if is_high_scoring else 0.51
 
             elif v.market_type == MarketType.CORNER_OU:
-                # Tính tốc độ phạt góc thực tế mỗi phút
-                crn_per_min = (crn_h + crn_a) / max(10, elapsed)
-                da_per_min = total_da / max(10, elapsed)
-                corner_pressure = (crn_per_min * 3.8) + (da_per_min * 0.4)
-                true_prob = min(0.66, max(0.47, 0.46 + (corner_pressure - 0.70) * 0.22))
+                crn_per_min = (crn_h + crn_a) / max(12, elapsed)
+                da_per_min = total_da / max(12, elapsed)
+                corner_pressure = ((crn_per_min * 3.8) + (da_per_min * 0.4)) * math.sqrt(remaining_ratio)
+                true_prob = min(0.65, max(0.46, 0.46 + (corner_pressure - 0.68) * 0.22))
 
             elif v.market_type == MarketType.HDP:
                 if v.phase == MatchPhase.LIVE:
-                    # Đội chủ nhà ép sân vượt trội về Dangerous Attacks & Shots on Target
-                    dom_da = (da_h - da_a) / max(10, elapsed)
-                    dom_sot = (sot_h - sot_a) / max(10, elapsed)
-                    dom_score = dom_da * 0.8 + dom_sot * 2.2
-                    true_prob = min(0.66, max(0.45, 0.48 + dom_score * 0.30))
+                    # Ưu tiên đội chủ nhà đang hòa hoặc bị dẫn 1 bàn nhưng ép sân mạnh (chống bẫy đội đã dẫn 2-3 bàn đá chậm)
+                    score_diff = v.score_home - v.score_away
+                    if score_diff >= 2:
+                        true_prob = 0.46
+                    else:
+                        dom_da = (da_h - da_a) / max(12, elapsed)
+                        dom_sot = (sot_h - sot_a) / max(12, elapsed)
+                        dom_score = (dom_da * 0.8 + dom_sot * 2.2) * math.sqrt(remaining_ratio)
+                        true_prob = min(0.65, max(0.45, 0.48 + dom_score * 0.30))
                 else:
                     is_strong_home = (int(m.get("MatchId", 0)) % 9 == 0)
                     true_prob = 0.615 if is_strong_home else 0.50

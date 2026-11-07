@@ -158,29 +158,28 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
                 f"([bold yellow]{live_count} trận đang LIVE[/bold yellow]) -> Phân tích [bold]{len(paired)}[/bold] dòng kèo."
             )
 
-            # BƯỚC 2 & 3: Phân tích từng cặp & Đặt cược
+            # BƯỚC 2 & 3: Phân tích từng cặp, sắp xếp ưu tiên kèo có +EV cao nhất mỗi trận & Đặt cược
             new_bets_this_tick = 0
             skipped_low_ev = 0
             skipped_locked = 0
 
+            candidate_signals = []
             for match_key, s_line, v_line in paired:
-                true_prob, fair_odds = analyzer.devig_power(
-                    s_line.odds_dec, s_line.opposite_odds_dec
-                )
-                ev_pct = round(((true_prob * v_line.odds_dec) - 1.0) * 100.0, 2)
-                viva_hk = OddsConverter.dec_to_hk(v_line.odds_dec)
-
                 signal = analyzer.evaluate_pair(
                     sharp_line=s_line,
                     viva_line=v_line,
                     match_key=match_key,
                     current_bankroll=risk_mgr.bankroll,
                 )
-
                 if not signal:
                     skipped_low_ev += 1
-                    continue
+                else:
+                    candidate_signals.append(signal)
 
+            # Ưu tiên chọn kèo có lợi nhuận kỳ vọng (+EV%) cao nhất trước
+            candidate_signals.sort(key=lambda s: s.ev_percent, reverse=True)
+
+            for signal in candidate_signals:
                 if not risk_mgr.can_place_bet(signal):
                     skipped_locked += 1
                     logger.info(
@@ -190,7 +189,7 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
                     console.print(
                         f"     [yellow]• [ĐÃ KHÓA 1 CỬA] (Saba:{signal.saba_id}) [{signal.league}] "
                         f"{signal.home_team} vs {signal.away_team} ({signal.minute}, Tỉ số {signal.score_home}-{signal.score_away}) "
-                        f"— Đã có vé {signal.market_type.value} đang chạy.[/yellow]"
+                        f"— Đã có vé trên trận này.[/yellow]"
                     )
                     continue
 

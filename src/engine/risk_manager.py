@@ -19,6 +19,7 @@ class RiskManager:
         self.initial_capital = float(config["bankroll"]["initial_capital"])
         self.bankroll = self.initial_capital  # Số dư khả dụng (đã trừ tiền các vé đang RUNNING)
         self.one_shot_only = config["strategy"].get("one_shot_per_market", True)
+        self.one_bet_per_match = config["strategy"].get("one_bet_per_match", True)
         self.ledger_path = ledger_path
         self.locked_markets: Set[str] = set()
         self.tickets: List[BetTicket] = []
@@ -104,11 +105,16 @@ class RiskManager:
             json.dump(payload, f, indent=2, ensure_ascii=False)
 
     def lock_key(self, signal: ValueSignal) -> str:
+        if self.one_bet_per_match:
+            return f"MATCH::{signal.match_id}"
         return f"{signal.match_id}::{signal.market_type.value}"
 
     def can_place_bet(self, signal: ValueSignal) -> bool:
-        if self.one_shot_only and self.lock_key(signal) in self.locked_markets:
-            return False
+        if self.one_shot_only:
+            if self.lock_key(signal) in self.locked_markets:
+                return False
+            if f"{signal.match_id}::{signal.market_type.value}" in self.locked_markets:
+                return False
         if signal.recommended_stake > self.bankroll:
             return False
         return True

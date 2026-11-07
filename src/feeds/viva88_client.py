@@ -131,13 +131,33 @@ class Viva88Client:
             sa = int(a_info.get("FullScore", 0))
             ch = int(h_info.get("CornerKick", 0))
             ca = int(a_info.get("CornerKick", 0))
+            mt = int(m.get("MatchTime") or (45 if st == 20 else 0))
             minute_str = self.format_minute(m)
 
-            # 1. Kèo Tài Xỉu Bàn Thắng (OU) dựa trên tổng bàn hiện tại
+            # BỘ LỌC BẢO VỆ VỐN KÈO LIVE (Rút kinh nghiệm từ Log thực chiến):
+            # 1. Không vào kèo Rung quá sớm (< 12') hoặc quá muộn (> 70' cuối trận câu giờ)
+            # 2. Không vào kèo khi cách biệt tỉ số đã >= 3 bàn (trận đấu đã an bài)
+            if phase == MatchPhase.LIVE:
+                min_mt = int(self.strat_cfg.get("live_min_minute", 12))
+                max_mt = int(self.strat_cfg.get("live_max_minute", 70))
+                max_diff = int(self.strat_cfg.get("max_live_goal_diff", 2))
+                if not (min_mt <= mt <= max_mt):
+                    continue
+                if abs(sh - sa) > max_diff:
+                    continue
+
+            # 1. Kèo Tài Xỉu Bàn Thắng (OU) dịch chuyển mốc Line động theo phút giống chuẩn Saba:
             total_goals = sh + sa
-            ou_line = float(total_goals) + 1.5 if phase == MatchPhase.LIVE else 2.5
-            # Giá HK trên sảnh Saba (dao động quanh 0.72 - 0.88 tùy nhịp trận đấu)
-            viva_hk_ou = 0.76 if phase == MatchPhase.LIVE else 0.84
+            if phase == MatchPhase.LIVE:
+                if mt <= 30:
+                    ou_line = float(total_goals) + 1.5
+                elif mt <= 55:
+                    ou_line = float(total_goals) + 1.0
+                else:
+                    ou_line = float(total_goals) + 0.75  # Phút 56-70 chỉ cần nổ 1 bàn là ăn nửa!
+            else:
+                ou_line = 2.5
+            viva_hk_ou = 0.78 if phase == MatchPhase.LIVE else 0.84
             lines.append(
                 OddsLine(
                     source="VIVA88",
