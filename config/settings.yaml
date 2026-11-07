@@ -15,9 +15,12 @@ strategy:
   steam_window_sec: 120
   one_shot_per_market: true  # BẮT BUỘC: Chỉ đánh 1 cửa/trận/loại kèo, không bù khi nhảy line
   one_bet_per_match: true    # Chống thua kép: Mỗi trận chỉ chọn 1 mã có +EV cao nhất
-  live_min_minute: 12        # Kèo Rung chỉ vào từ phút 12' (đã đủ dữ liệu nhịp độ trận đấu)
-  live_max_minute: 70        # CẤM vào kèo sau phút 70' (tránh rủi ro cuối trận câu giờ)
+  max_running_tickets: 10    # Giới hạn tối đa 10 vé RUNNING cùng lúc để bảo toàn vốn khả dụng
+  live_min_minute: 28        # Khung giờ vàng Kèo Rung: Chỉ vào từ phút 28' (cuối H1 & đầu/giữa H2)
+  live_max_minute: 68        # CẤM vào kèo sau phút 68' (tránh rủi ro cuối trận câu giờ)
   max_live_goal_diff: 2      # CẤM vào kèo khi cách biệt tỉ số đã >= 3 bàn (trận đấu đã an bài)
+  min_live_sot: 2            # Bắt buộc trận Live phải có ít nhất 2 cú sút trúng đích (chống trận đá chết / mất thống kê)
+  min_live_da: 22            # Bắt buộc tổng Tấn công nguy hiểm (Dangerous Attacks) >= 22
   markets_enabled:
     - "HDP"                  # Kèo chấp Châu Á
     - "OU"                   # Tài Xỉu bàn thắng

@@ -20,6 +20,7 @@ class RiskManager:
         self.bankroll = self.initial_capital  # Số dư khả dụng (đã trừ tiền các vé đang RUNNING)
         self.one_shot_only = config["strategy"].get("one_shot_per_market", True)
         self.one_bet_per_match = config["strategy"].get("one_bet_per_match", True)
+        self.max_running_tickets = int(config["strategy"].get("max_running_tickets", 10))
         self.ledger_path = ledger_path
         self.locked_markets: Set[str] = set()
         self.tickets: List[BetTicket] = []
@@ -113,6 +114,9 @@ class RiskManager:
         return f"{signal.match_id}::{signal.market_type.value}"
 
     def can_place_bet(self, signal: ValueSignal) -> bool:
+        running_now = sum(1 for t in self.tickets if t.status == BetStatus.RUNNING)
+        if running_now >= self.max_running_tickets:
+            return False
         if self.one_shot_only:
             if self.lock_key(signal) in self.locked_markets:
                 return False
@@ -181,9 +185,21 @@ class RiskManager:
             elif st == 50:
                 t.current_minute = "FT"
 
-            # Kiểm tra điều kiện ăn sớm (Early Settlement) cho cửa OVER ngay trong trận
+            # Kiểm tra điều kiện VAR hủy bàn thắng (Khi tổng bàn hiện tại thấp hơn tổng bàn lúc vào vé) -> Saba Void/PUSH vé
             total_goals = sh + sa
             total_corners = ch + ca
+            try:
+                bet_sh, bet_sa = [int(x) for x in t.score_at_bet.split("-")]
+            except Exception:
+                bet_sh, bet_sa = 0, 0
+            if total_goals < (bet_sh + bet_sa):
+                t.status = BetStatus.PUSH
+                t.pnl = 0.0
+                self.bankroll += t.stake
+                t.note = "Hoàn tiền PUSH (Trọng tài VAR hủy bàn thắng lúc đặt vé)"
+                continue
+
+            # Kiểm tra điều kiện ăn sớm (Early Settlement) cho cửa OVER ngay trong trận
             early_over_win = False
             if t.market_type == MarketType.OU and t.side == "OVER" and (total_goals - t.line) >= 0.5:
                 early_over_win = True

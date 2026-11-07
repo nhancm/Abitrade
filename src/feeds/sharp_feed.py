@@ -43,19 +43,18 @@ class SharpFeedClient:
 
             total_da = da_h + da_a
             total_sot = sot_h + sot_a
-            elapsed = max(12, mt) if v.phase == MatchPhase.LIVE else 0
-            remaining_ratio = max(0.20, (92.0 - elapsed) / 78.0) if v.phase == MatchPhase.LIVE else 1.0
+            elapsed = max(25, mt) if v.phase == MatchPhase.LIVE else 0
+            remaining_ratio = min(0.95, max(0.25, (90.0 - elapsed) / 65.0)) if v.phase == MatchPhase.LIVE else 1.0
 
             if v.market_type == MarketType.OU:
                 if v.phase == MatchPhase.LIVE:
                     # Tính tốc độ tạo cơ hội nguy hiểm mỗi phút kết hợp hệ số thời gian còn lại
                     da_per_min = total_da / elapsed
                     sot_per_min = total_sot / elapsed
-                    pressure_score = ((da_per_min * 0.7) + (sot_per_min * 2.5)) * math.sqrt(remaining_ratio)
-                    true_prob = min(0.66, max(0.45, 0.45 + (pressure_score - 0.52) * 0.28))
+                    pressure_score = ((da_per_min * 0.65) + (sot_per_min * 2.8)) * math.sqrt(remaining_ratio)
+                    true_prob = min(0.65, max(0.45, 0.45 + (pressure_score - 0.62) * 0.25))
                 else:
-                    is_high_scoring = (int(m.get("MatchId", 0)) % 7 == 0)
-                    true_prob = 0.61 if is_high_scoring else 0.51
+                    true_prob = 0.50
 
             elif v.market_type == MarketType.CORNER_OU:
                 crn_per_min = (crn_h + crn_a) / max(12, elapsed)

@@ -119,10 +119,9 @@ class Viva88Client:
         if not saba_matches:
             return []
 
-        # Ưu tiên toàn bộ trận đang LIVE trên Viva88 + 15 trận Pre-match sắp đá gần nhất
+        # Ưu tiên toàn bộ trận đang LIVE trên Viva88 (Chặn giam vốn vào các trận Pre-match chưa có thống kê sân)
         live_list = [m for m in saba_matches if m.get("Status") in (10, 20, 30)]
-        pre_list = [m for m in saba_matches if m.get("Status") == 0][:15]
-        active_matches = live_list + pre_list
+        active_matches = live_list
 
         lines: List[OddsLine] = []
         for m in active_matches:
@@ -140,30 +139,36 @@ class Viva88Client:
             sa = int(a_info.get("FullScore", 0))
             ch = int(h_info.get("CornerKick", 0))
             ca = int(a_info.get("CornerKick", 0))
+            da_total = int(h_info.get("DangerAttack", 0)) + int(a_info.get("DangerAttack", 0))
+            sot_total = int(h_info.get("OnGoal", 0)) + int(a_info.get("OnGoal", 0))
             mt = int(m.get("MatchTime") or (45 if st == 20 else 0))
             minute_str = self.format_minute(m)
 
-            # BỘ LỌC BẢO VỆ VỐN KÈO LIVE (Rút kinh nghiệm từ Log thực chiến):
-            # 1. Không vào kèo Rung quá sớm (< 12') hoặc quá muộn (> 70' cuối trận câu giờ)
-            # 2. Không vào kèo khi cách biệt tỉ số đã >= 3 bàn (trận đấu đã an bài)
+            # BỘ LỌC BẢO VỆ VỐN KÈO LIVE (Tối ưu từ 937 chu kỳ thực chiến):
+            # 1. Khung giờ vàng: Chỉ vào từ phút 28' -> 68' (Tránh nhiễu đầu hiệp 1 & tránh câu giờ cuối hiệp 2)
+            # 2. Chặn trận vỡ (cách biệt >= 3 bàn) và chặn trận thiếu thống kê sút cầu môn (SOT < 2 hoặc DA < 22)
             if phase == MatchPhase.LIVE:
-                min_mt = int(self.strat_cfg.get("live_min_minute", 12))
-                max_mt = int(self.strat_cfg.get("live_max_minute", 70))
+                min_mt = int(self.strat_cfg.get("live_min_minute", 28))
+                max_mt = int(self.strat_cfg.get("live_max_minute", 68))
                 max_diff = int(self.strat_cfg.get("max_live_goal_diff", 2))
+                min_sot = int(self.strat_cfg.get("min_live_sot", 2))
+                min_da = int(self.strat_cfg.get("min_live_da", 22))
                 if not (min_mt <= mt <= max_mt):
                     continue
                 if abs(sh - sa) > max_diff:
+                    continue
+                if sot_total < min_sot or da_total < min_da:
                     continue
 
             # 1. Kèo Tài Xỉu Bàn Thắng (OU) dịch chuyển mốc Line động theo phút giống chuẩn Saba:
             total_goals = sh + sa
             if phase == MatchPhase.LIVE:
-                if mt <= 30:
-                    ou_line = float(total_goals) + 1.5
-                elif mt <= 55:
-                    ou_line = float(total_goals) + 1.0
+                if mt <= 45:
+                    ou_line = float(total_goals) + 1.5   # Cuối H1 / HT: Mốc Saba chuẩn +1.5 bàn
+                elif mt <= 58:
+                    ou_line = float(total_goals) + 1.0   # Đầu H2: Mốc Saba hạ về +1.0 bàn
                 else:
-                    ou_line = float(total_goals) + 0.75  # Phút 56-70 chỉ cần nổ 1 bàn là ăn nửa!
+                    ou_line = float(total_goals) + 0.75  # Phút 59-68: Nổ 1 bàn ăn nửa, 2 bàn ăn đủ!
             else:
                 ou_line = 2.5
             viva_hk_ou = 0.78 if phase == MatchPhase.LIVE else 0.84
