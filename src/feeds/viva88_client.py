@@ -54,7 +54,7 @@ class Viva88Client:
         - Tên đội bóng có khác biệt nhỏ ("Kawasaki", "Arsenal") để kiểm tra Fuzzy Matcher.
         - Giá Viva88 chậm nhịp hơn Pinnacle 1-3 giây ở các kèo Live & Phạt góc -> Tạo cơ hội +EV.
         """
-        return [
+        board = [
             # Trận 1: Viva88 vẫn giữ giá HK 0.72 (Dec 1.72) khi Pinnacle đã tụt xuống 1.52
             OddsLine(
                 source="VIVA88",
@@ -70,7 +70,7 @@ class Viva88Client:
                 opposite_odds_dec=OddsConverter.hk_to_dec(1.14),
                 score_home=1,
                 score_away=0,
-                minute=58,
+                minute=min(89, 55 + tick),
                 raw_line_id="SABA_TICKET_OU_9001",
             ),
             # Trận 2: Kèo Rung Phạt Góc (Saba định giá HK 0.70 = Dec 1.70, trong khi Fair Odds của Sharp là 1.62)
@@ -88,7 +88,7 @@ class Viva88Client:
                 opposite_odds_dec=OddsConverter.hk_to_dec(1.16),
                 score_home=0,
                 score_away=1,
-                minute=34,
+                minute=min(89, 30 + tick),
                 raw_line_id="SABA_TICKET_CRN_9002",
             ),
             # Trận 3: Pre-match Chấp Châu Á Arsenal -1.0 (Viva88 đang để HK 0.74 = Dec 1.74)
@@ -137,6 +137,34 @@ class Viva88Client:
                 raw_line_id="SABA_TICKET_HDP_9005",
             ),
         ]
+
+        dynamic_leagues = [
+            ("Bundesliga", "Bayern Munich", "Werder Bremen", MarketType.HDP, -1.5, "HOME"),
+            ("Ligue 1", "PSG", "Nantes", MarketType.OU, 3.0, "OVER"),
+            ("Brazil Serie A", "Flamengo RJ", "Santos", MarketType.CORNER_OU, 10.5, "OVER"),
+            ("Eredivisie", "Ajax", "Utrecht", MarketType.CORNER_HDP, -2.0, "HOME"),
+            ("K-League 1", "Ulsan Hyundai", "Seoul", MarketType.OU, 2.5, "OVER"),
+        ]
+        if tick >= 2:
+            idx = (tick - 2) % len(dynamic_leagues)
+            lg, h_team, a_team, m_type, line_val, side_val = dynamic_leagues[idx]
+            board.append(
+                OddsLine(
+                    source="VIVA88",
+                    match_id=f"SABA_{9200 + tick}",
+                    league=lg,
+                    home_team=f"{h_team} (R{tick // len(dynamic_leagues) + 1})",
+                    away_team=a_team,
+                    phase=MatchPhase.LIVE if (tick % 2 == 0) else MatchPhase.PREMATCH,
+                    market_type=m_type,
+                    line=line_val,
+                    side=side_val,
+                    odds_dec=OddsConverter.hk_to_dec(0.73),
+                    opposite_odds_dec=OddsConverter.hk_to_dec(1.13),
+                    raw_line_id=f"SABA_TICKET_DYN_{tick}",
+                )
+            )
+        return board
 
     async def get_ticket_quote(self, signal: ValueSignal) -> Tuple[bool, float, float]:
         """

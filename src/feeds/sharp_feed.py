@@ -70,14 +70,13 @@ class SharpFeedClient:
 
     def _generate_realistic_sharp_stream(self, tick: int) -> List[OddsLine]:
         """
-        Tạo luồng dữ liệu Sharp (Pinnacle) bao gồm đầy đủ:
-        - Pre-match & Live (Rung)
-        - Kèo Chấp (HDP), Tài Xỉu bàn thắng (OU), Tài Xỉu Phạt Góc (CORNER_OU), Chấp Góc (CORNER_HDP)
-        - Mô phỏng cả sóng Steam Drop (sụt giá đột ngột ở tick >= 1)
+        Tạo luồng dữ liệu Sharp (Pinnacle) biến động liên tục theo từng chu kỳ (tick):
+        - Có sẵn các trận cơ sở + tự động sinh thêm trận mới sau mỗi vài chu kỳ để kiểm thử chạy dài hạn.
+        - Mô phỏng biến động giá thực tế (jitter) và sóng Steam Drop (sụt giá đột ngột).
         """
-        steam_shift = -0.10 if tick >= 1 else 0.0
+        rng = random.Random(tick)
+        steam_shift = -0.10 if (tick % 3 == 1) else 0.0
         base_matches = [
-            # 1. Kèo Live Tài Xỉu bàn thắng (Đang ép sân mạnh, Pinnacle sụt giá Tài 2.25)
             OddsLine(
                 source="PINNACLE",
                 match_id="SHARP_101",
@@ -88,13 +87,12 @@ class SharpFeedClient:
                 market_type=MarketType.OU,
                 line=2.25,
                 side="OVER",
-                odds_dec=round(1.62 + steam_shift, 3),   # Khi tick=1 tụt xuống 1.52 -> Winrate ~63% + Steam
+                odds_dec=round(1.62 + steam_shift, 3),
                 opposite_odds_dec=round(2.38 - steam_shift, 3),
                 score_home=1,
                 score_away=0,
-                minute=58,
+                minute=min(89, 55 + tick),
             ),
-            # 2. Kèo Live Tài Góc (CORNER_OU) - Giải cỏ/Phạt góc nhà cái Saba rất hay trễ nhịp
             OddsLine(
                 source="PINNACLE",
                 match_id="SHARP_102",
@@ -109,9 +107,8 @@ class SharpFeedClient:
                 opposite_odds_dec=2.46,
                 score_home=0,
                 score_away=1,
-                minute=34,
+                minute=min(89, 30 + tick),
             ),
-            # 3. Kèo Pre-match Chấp Châu Á (HDP) có Winrate cao (P_true ~ 60.5%)
             OddsLine(
                 source="PINNACLE",
                 match_id="SHARP_103",
@@ -125,7 +122,6 @@ class SharpFeedClient:
                 odds_dec=1.59,
                 opposite_odds_dec=2.45,
             ),
-            # 4. Kèo Pre-match Chấp Góc (CORNER_HDP)
             OddsLine(
                 source="PINNACLE",
                 match_id="SHARP_104",
@@ -139,7 +135,6 @@ class SharpFeedClient:
                 odds_dec=1.55,
                 opposite_odds_dec=2.50,
             ),
-            # 5. Kèo Nhiễu (Không đủ Winrate/EV để kiểm tra bộ lọc từ chối chuẩn xác)
             OddsLine(
                 source="PINNACLE",
                 match_id="SHARP_105",
@@ -154,4 +149,37 @@ class SharpFeedClient:
                 opposite_odds_dec=1.95,
             ),
         ]
+
+        # Cứ mỗi chu kỳ từ tick >= 2, sinh thêm trận Live/Pre-match mới để luồng chạy liên tục
+        dynamic_leagues = [
+            ("Germany Bundesliga", "Bayern Munich", "Werder Bremen", MarketType.HDP, -1.5, "HOME"),
+            ("France Ligue 1", "PSG", "Nantes FC", MarketType.OU, 3.0, "OVER"),
+            ("Brazil Serie A", "Flamengo", "Santos FC", MarketType.CORNER_OU, 10.5, "OVER"),
+            ("Netherlands Eredivisie", "Ajax Amsterdam", "Utrecht", MarketType.CORNER_HDP, -2.0, "HOME"),
+            ("Korea K-League 1", "Ulsan Hyundai", "FC Seoul", MarketType.OU, 2.5, "OVER"),
+        ]
+        if tick >= 2:
+            idx = (tick - 2) % len(dynamic_leagues)
+            lg, h_team, a_team, m_type, line_val, side_val = dynamic_leagues[idx]
+            match_num = 200 + tick
+            # Xen kẽ: có chu kỳ kèo đạt chuẩn +EV, có chu kỳ kèo bình thường để thấy rõ bộ lọc
+            is_value_tick = (tick % 2 == 0)
+            s_odds = round(rng.uniform(1.52, 1.62), 3) if is_value_tick else 1.92
+            opp_odds = round(3.98 - s_odds, 3)
+            base_matches.append(
+                OddsLine(
+                    source="PINNACLE",
+                    match_id=f"SHARP_{match_num}",
+                    league=lg,
+                    home_team=f"{h_team} (R{tick // len(dynamic_leagues) + 1})",
+                    away_team=a_team,
+                    phase=MatchPhase.LIVE if (tick % 2 == 0) else MatchPhase.PREMATCH,
+                    market_type=m_type,
+                    line=line_val,
+                    side=side_val,
+                    odds_dec=s_odds,
+                    opposite_odds_dec=opp_odds,
+                    minute=rng.randint(15, 75),
+                )
+            )
         return base_matches
