@@ -57,48 +57,49 @@ def load_config(path: str = "config/settings.yaml", secrets_path: str = "config/
     return cfg
 
 
-def print_summary_table(risk_mgr: RiskManager, stats: dict) -> None:
-    table = Table(title="\nBẢNG TỔNG KẾT VÉ ĐẶT GIẢ LẬP (PAPER TRADE VIVA88)")
-    table.add_column("Mã Vé", style="cyan")
-    table.add_column("Trận Đấu", style="white")
-    table.add_column("Loại Kèo", style="magenta")
-    table.add_column("Cửa Đặt (1 Cửa)", style="yellow")
-    table.add_column("Odds (Dec/HK)", justify="right")
-    table.add_column("Tỉ Lệ Thắng Thực", justify="right", style="green")
-    table.add_column("+EV%", justify="right", style="green")
+def print_tickets_table(risk_mgr: RiskManager, stats: dict, title: str) -> None:
+    table = Table(title=title)
+    table.add_column("Mã Vé (SabaID)", style="cyan")
+    table.add_column("Giải / Trận Đấu Thực Tế Viva88", style="white")
+    table.add_column("Phút & Tỉ Số", justify="center", style="yellow")
+    table.add_column("Cửa Đặt (1 Cửa)", style="magenta")
+    table.add_column("Odds (HK)", justify="right")
+    table.add_column("Winrate / +EV", justify="right", style="green")
     table.add_column("Tiền Cược", justify="right")
-    table.add_column("Kết Quả", justify="center")
+    table.add_column("Trạng Thái / Lãi Lỗ", justify="center")
 
     for t in risk_mgr.tickets:
-        status_str = (
-            f"[bold green]{t.status.value}[/bold green]"
-            if t.status.value == "WON"
-            else (
-                f"[bold red]{t.status.value}[/bold red]"
-                if t.status.value == "LOST"
-                else f"[bold yellow]{t.status.value}[/bold yellow]"
-            )
-        )
+        if t.status.value == "RUNNING":
+            status_str = "[bold yellow]RUNNING (Chờ hết trận)[/bold yellow]"
+        elif t.status.value in ("WON", "HALF_WON"):
+            status_str = f"[bold green]{t.status.value} ({t.pnl:+,.1f})[/bold green]"
+        elif t.status.value in ("LOST", "HALF_LOST"):
+            status_str = f"[bold red]{t.status.value} ({t.pnl:+,.1f})[/bold red]"
+        else:
+            status_str = f"[bold white]{t.status.value}[/bold white]"
+
+        live_info = f"{t.current_minute} | {t.current_score} (Góc {t.current_corners})"
         table.add_row(
-            t.ticket_id,
-            t.match_name,
-            f"{t.phase.value} - {t.market_type.value}",
-            t.selection,
-            f"{t.odds_accepted:.2f} ({t.odds_accepted - 1.0:.2f})",
-            f"{t.true_win_prob * 100:.1f}%",
-            f"+{t.ev_percent:.2f}%",
+            f"{t.ticket_id}\n[dim]Saba:{t.saba_id}[/dim]",
+            f"[bold]{t.match_name}[/bold]\n[dim]{t.league}[/dim]",
+            live_info,
+            f"{t.phase.value} {t.market_type.value}\n[bold yellow]{t.selection}[/bold yellow] (Lúc đặt: {t.score_at_bet})",
+            f"{t.odds_accepted:.2f}\n(HK {t.odds_accepted - 1.0:.2f})",
+            f"{t.true_win_prob * 100:.1f}%\n+{t.ev_percent:.2f}%",
             f"{t.stake:,.0f}",
             status_str,
         )
 
     console.print(table)
     console.print(
-        f"[bold]Thống kê Paper Trade:[/bold] Tổng số mã: {stats['settled']} | "
-        f"Thắng: [green]{stats['won']}[/green] - Thua: [red]{stats['lost']}[/red] "
-        f"(Winrate: [bold green]{stats['win_rate']}%[/bold green]) | "
-        f"Lãi ròng: [bold green]{stats['net_profit']:+,.2f}[/bold green] "
-        f"(ROI: [bold yellow]{stats['roi']:+.2f}%[/bold yellow]) | "
-        f"Số dư hiện tại: [bold cyan]{stats['bankroll']:,.2f}[/bold cyan]\n"
+        f"[bold]Tổng quan Ví Paper Trade:[/bold] "
+        f"Vé đang chạy (RUNNING): [bold yellow]{stats['running_count']} vé ({stats['running_stake']:,.0f} đ)[/bold yellow] | "
+        f"Đã kết toán FT: [bold]{stats['settled']}[/bold] "
+        f"(Thắng: [green]{stats['won']}[/green] / Thua: [red]{stats['lost']}[/red] / Hòa: {stats['push']} - "
+        f"Winrate: [bold green]{stats['win_rate']}%[/bold green]) | "
+        f"Lãi đã chốt: [bold green]{stats['net_profit']:+,.2f}[/bold green] | "
+        f"Số dư khả dụng: [bold cyan]{stats['available_bankroll']:,.2f}[/bold cyan] "
+        f"(Tổng tài sản: [bold white]{stats['total_equity']:,.2f}[/bold white])\n"
     )
 
 
@@ -112,23 +113,22 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
     risk_mgr = RiskManager(cfg)
 
     await viva_client.login()
+    init_stats = risk_mgr.get_portfolio_stats()
     logger.info(
-        f"START BOT | mode={cfg['mode']} | account={viva_client.logged_in_user} | "
-        f"session={viva_client.session_token} | bankroll={risk_mgr.bankroll:.2f} | "
-        f"min_win_prob={cfg['strategy']['min_win_prob']} | min_ev={cfg['strategy']['min_ev_percent']}%"
+        f"START REALTIME BOT | mode={cfg['mode']} | account={viva_client.logged_in_user} | "
+        f"session={viva_client.session_token} | available_bankroll={init_stats['available_bankroll']:.2f}"
     )
 
     console.print(
         Panel.fit(
-            f"[bold cyan]HỆ THỐNG AUTOBET 1 CỬA VIVA88 (CHẾ ĐỘ: {cfg['mode'].upper()})[/bold cyan]\n"
+            f"[bold cyan]HỆ THỐNG AUTOBET 1 CỬA VIVA88 — DỮ LIỆU TRẬN ĐẤU THỰC TẾ SABA SPORTS[/bold cyan]\n"
             f"• Tài khoản Viva88: [bold yellow]{viva_client.logged_in_user}[/bold yellow] (Session: [green]{viva_client.session_token}[/green])\n"
-            f"• Vốn hiện tại: [bold green]{risk_mgr.bankroll:,.2f}[/bold green] | "
-            f"Điều kiện nổ kèo: [yellow]Winrate thực >= {cfg['strategy']['min_win_prob']*100:.0f}%[/yellow] & "
-            f"[yellow]+EV >= {cfg['strategy']['min_ev_percent']}%[/yellow]\n"
-            f"• Quy tắc kỷ luật: [bold magenta]Chỉ đánh 1 cửa duy nhất mỗi trận/loại kèo (Không bù khi nhảy line)[/bold magenta]\n"
-            f"• File Log tối ưu: [bold green]logs/abitrade.log[/bold green] & [bold green]logs/audit_metrics.jsonl[/bold green]\n"
-            f"• Chu kỳ quét: [bold white]{poll_interval:.0f} giây/lần[/bold white] | "
-            f"Nhấn tổ hợp phím [bold red]Ctrl + C[/bold red] bất cứ lúc nào để dừng và xem bảng tổng kết.",
+            f"• Số dư khả dụng: [bold green]{init_stats['available_bankroll']:,.2f}[/bold green] "
+            f"(Đang treo RUNNING: [yellow]{init_stats['running_count']} vé / {init_stats['running_stake']:,.0f}[/yellow])\n"
+            f"• Điều kiện nổ kèo: [yellow]Winrate thực >= {cfg['strategy']['min_win_prob']*100:.0f}%[/yellow] & "
+            f"[yellow]+EV >= {cfg['strategy']['min_ev_percent']}%[/yellow] (Chỉ đánh 1 cửa / Không bù kèo)\n"
+            f"• Cơ chế kết toán: [bold green]Theo dõi tỉ số & phạt góc thực tế trên Viva88 — Chỉ chốt tiền khi trận đấu FT (hoặc nổ đủ Tài sớm)[/bold green]\n"
+            f"• Nhấn [bold red]Ctrl + C[/bold red] bất cứ lúc nào để dừng và xem bảng chi tiết.",
             border_style="cyan",
         )
     )
@@ -144,15 +144,18 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
                 f"\n[bold white]━━━━━━━━━━━━━━━━ [Chu kỳ #{tick + 1} | {now_str}] ━━━━━━━━━━━━━━━━[/bold white]"
             )
 
-            # BƯỚC 1: Quét dữ liệu 2 đầu
-            sharp_lines, viva_lines = await asyncio.gather(
-                sharp_client.fetch_sharp_lines(tick=tick),
-                viva_client.fetch_viva88_lines(tick=tick),
+            # BƯỚC 1: Lấy danh sách trận đấu THẬT đang mở trên sảnh Saba của Viva88
+            viva_lines = await viva_client.fetch_viva88_lines(tick=tick)
+            saba_matches = list(viva_client.live_match_map.values())
+            sharp_lines = sharp_client.build_sharp_lines_from_real_matches(
+                saba_matches=saba_matches, viva_lines=viva_lines, tick=tick
             )
             paired = MatchMatcher.pair_lines(sharp_lines, viva_lines)
+            live_count = sum(1 for m in saba_matches if m.get("Status") in (10, 20, 30))
+
             console.print(
-                f"  [cyan]1. Quét & Ghép cặp:[/cyan] Thu thập {len(sharp_lines)} kèo Pinnacle & "
-                f"{len(viva_lines)} kèo Viva88 -> Ghép khớp [bold]{len(paired)}[/bold] cặp trận."
+                f"  [cyan]1. Quét Bảng Kèo Viva88 Thực Tế:[/cyan] Tổng {len(saba_matches)} trận Saba hôm nay "
+                f"([bold yellow]{live_count} trận đang LIVE[/bold yellow]) -> Phân tích [bold]{len(paired)}[/bold] dòng kèo."
             )
 
             # BƯỚC 2 & 3: Phân tích từng cặp & Đặt cược
@@ -174,86 +177,72 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
                     current_bankroll=risk_mgr.bankroll,
                 )
 
-                # Nếu không đạt tiêu chuẩn Winrate hoặc +EV, in rõ lý do lọc bỏ
                 if not signal:
                     skipped_low_ev += 1
-                    logger.info(
-                        f"CYCLE #{tick+1} | SKIP_FILTER | {v_line.home_team} vs {v_line.away_team} | "
-                        f"{v_line.phase.value} {v_line.market_type.value} {v_line.side} {v_line.line} | "
-                        f"sharp_dec={s_line.odds_dec:.2f} viva_hk={viva_hk:.2f} | win_prob={true_prob*100:.1f}% ev={ev_pct:+.2f}%"
-                    )
-                    console.print(
-                        f"     [dim]• [BỎ QUA - KHÔNG ĐỦ ĐIỀU KIỆN] {v_line.home_team} vs {v_line.away_team} "
-                        f"({v_line.market_type.value} {v_line.side} {v_line.line}) | "
-                        f"Viva88 HK {viva_hk:.2f} | Winrate thực: {true_prob*100:.1f}% | EV: {ev_pct:+.2f}%[/dim]"
-                    )
                     continue
 
-                # Nếu đạt tiêu chuẩn nhưng trận này đã đánh 1 mã trước đó -> Khóa 1 cửa
                 if not risk_mgr.can_place_bet(signal):
                     skipped_locked += 1
                     logger.info(
-                        f"CYCLE #{tick+1} | SKIP_LOCKED_1SHOT | {signal.home_team} vs {signal.away_team} | "
-                        f"{signal.market_type.value} {signal.side} {signal.line} | ev={signal.ev_percent:+.2f}%"
+                        f"CYCLE #{tick+1} | SKIP_LOCKED_1SHOT | Saba:{signal.saba_id} | {signal.home_team} vs {signal.away_team} | "
+                        f"{signal.market_type.value} {signal.side} {signal.line}"
                     )
                     console.print(
-                        f"     [yellow]• [ĐÃ KHÓA 1 CỬA - KHÔNG BÙ KÈO] {signal.home_team} vs {signal.away_team} "
-                        f"({signal.market_type.value} {signal.side} {signal.line}) - Đã có vé trên trận này.[/yellow]"
+                        f"     [yellow]• [ĐÃ KHÓA 1 CỬA] (Saba:{signal.saba_id}) [{signal.league}] "
+                        f"{signal.home_team} vs {signal.away_team} ({signal.minute}, Tỉ số {signal.score_home}-{signal.score_away}) "
+                        f"— Đã có vé {signal.market_type.value} đang chạy.[/yellow]"
                     )
                     continue
 
-                # Đạt đủ điều kiện -> Gọi Autobet Viva88 (GetTicket -> Slippage Guard -> PlaceBet)
                 ticket = await viva_client.place_single_bet(signal)
                 risk_mgr.register_ticket(signal, ticket)
                 new_bets_this_tick += 1
                 logger.info(
-                    f"CYCLE #{tick+1} | BET_PLACED | id={ticket.ticket_id} | type={signal.signal_type} | "
-                    f"{ticket.match_name} | {ticket.phase.value} {ticket.market_type.value} {ticket.selection} | "
-                    f"odds_dec={ticket.odds_accepted:.2f} (hk={signal.viva88_hk_odds:.2f}) | "
+                    f"CYCLE #{tick+1} | BET_PLACED_RUNNING | id={ticket.ticket_id} | saba_id={ticket.saba_id} | "
+                    f"[{ticket.league}] {ticket.match_name} ({ticket.current_minute}, score={ticket.current_score}, crn={ticket.current_corners}) | "
+                    f"{ticket.phase.value} {ticket.market_type.value} {ticket.selection} @ Dec {ticket.odds_accepted:.2f} (HK {signal.viva88_hk_odds:.2f}) | "
                     f"win_prob={signal.true_win_prob*100:.1f}% | ev=+{signal.ev_percent:.2f}% | stake={ticket.stake:.0f}"
                 )
                 console.print(
-                    f"     [bold green]★ [NỔ LỆNH {ticket.ticket_id} - {signal.signal_type}][/bold green] "
-                    f"[bold white]{ticket.match_name}[/bold white] | "
-                    f"[cyan]{ticket.phase.value} {ticket.market_type.value}[/cyan] "
-                    f"[bold yellow]{ticket.selection}[/bold yellow] @ Odds [bold]{ticket.odds_accepted:.2f}[/bold] "
-                    f"(HK {signal.viva88_hk_odds:.2f}) | Winrate: [bold green]{signal.true_win_prob*100:.1f}%[/bold green] "
+                    f"     [bold green]★ [VÀO VÉ {ticket.ticket_id} -> RUNNING][/bold green] "
+                    f"(Saba:[bold]{ticket.saba_id}[/bold]) [{ticket.league}] [bold white]{ticket.match_name}[/bold white] "
+                    f"([yellow]{ticket.current_minute} | Tỉ số {ticket.current_score} | Góc {ticket.current_corners}[/yellow]) -> "
+                    f"[cyan]{ticket.phase.value} {ticket.market_type.value}[/cyan] [bold yellow]{ticket.selection}[/bold yellow] "
+                    f"@ HK [bold]{signal.viva88_hk_odds:.2f}[/bold] | Winrate: [bold green]{signal.true_win_prob*100:.1f}%[/bold green] "
                     f"| EV: [bold green]+{signal.ev_percent:.2f}%[/bold green] | Cược: [bold]{ticket.stake:.0f}[/bold]"
                 )
 
-            # BƯỚC 4: Kết toán giả lập & Hiển thị trạng thái ví
-            stats = risk_mgr.settle_simulation_tickets(rng_seed=42 + tick)
+            # BƯỚC 4: Cập nhật tỉ số trực tiếp & Chốt các vé đã kết thúc (FT hoặc nổ đủ Tài sớm)
+            stats = risk_mgr.update_and_settle_real_tickets(viva_client.live_match_map)
             logger.info(
-                f"CYCLE #{tick+1} | SUMMARY | paired={len(paired)} new_bets={new_bets_this_tick} "
-                f"skip_filter={skipped_low_ev} skip_locked={skipped_locked} | "
-                f"settled={stats['settled']} won={stats['won']} lost={stats['lost']} "
-                f"win_rate={stats['win_rate']}% net_profit={stats['net_profit']:+.2f} "
-                f"roi={stats['roi']:+.2f}% bankroll={stats['bankroll']:.2f}"
+                f"CYCLE #{tick+1} | SUMMARY | saba_live={live_count} paired={len(paired)} new_bets={new_bets_this_tick} "
+                f"running={stats['running_count']} settled={stats['settled']} won={stats['won']} lost={stats['lost']} "
+                f"net_profit={stats['net_profit']:+.2f} avail_bankroll={stats['available_bankroll']:.2f}"
             )
             append_audit_jsonl(
                 {
                     "timestamp": datetime.now().isoformat(timespec="seconds"),
                     "cycle": tick + 1,
+                    "saba_live_matches": live_count,
                     "paired_count": len(paired),
                     "new_bets": new_bets_this_tick,
-                    "skipped_filter": skipped_low_ev,
-                    "skipped_locked": skipped_locked,
+                    "running_tickets": stats["running_count"],
+                    "running_stake": stats["running_stake"],
                     "settled": stats["settled"],
                     "won": stats["won"],
                     "lost": stats["lost"],
                     "win_rate": stats["win_rate"],
                     "net_profit": stats["net_profit"],
-                    "roi": stats["roi"],
-                    "bankroll": stats["bankroll"],
+                    "available_bankroll": stats["available_bankroll"],
+                    "total_equity": stats["total_equity"],
                 }
             )
+
             console.print(
-                f"  [cyan]2. Trạng thái Ví Paper Trade:[/cyan] Vé mới: [bold]{new_bets_this_tick}[/bold] | "
-                f"Tổng vé đã vào: [bold]{stats['settled']}[/bold] "
-                f"(Thắng: [green]{stats['won']}[/green] / Thua: [red]{stats['lost']}[/red] - "
-                f"Winrate: [bold green]{stats['win_rate']}%[/bold green]) | "
-                f"Lãi ròng: [bold green]{stats['net_profit']:+,.2f}[/bold green] | "
-                f"Số dư: [bold cyan]{stats['bankroll']:,.2f}[/bold cyan]"
+                f"  [cyan]2. Theo dõi Vé Thực Tế:[/cyan] Vé mới vào: [bold green]{new_bets_this_tick}[/bold green] | "
+                f"Đang treo chờ hết trận (RUNNING): [bold yellow]{stats['running_count']} vé ({stats['running_stake']:,.0f} đ)[/bold yellow] | "
+                f"Đã chốt FT: [bold]{stats['settled']}[/bold] (Thắng: [green]{stats['won']}[/green] / Thua: [red]{stats['lost']}[/red]) | "
+                f"Số dư khả dụng: [bold cyan]{stats['available_bankroll']:,.2f}[/bold cyan]"
             )
 
             tick += 1
@@ -261,7 +250,7 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
                 break
 
             console.print(
-                f"  [dim]Đang đợi {poll_interval:.0f}s cho chu kỳ quét tiếp theo (Bấm Ctrl + C để dừng)...[/dim]"
+                f"  [dim]Đang theo dõi tỉ số trực tiếp trên Viva88 (Cập nhật sau {poll_interval:.0f}s — Bấm Ctrl + C để dừng)...[/dim]"
             )
             await asyncio.sleep(poll_interval)
 
@@ -269,8 +258,12 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
         logger.info("STOP BOT | User pressed Ctrl+C")
         console.print("\n[bold yellow]>>> Đã nhận lệnh dừng (Ctrl + C) từ người dùng![/bold yellow]")
 
-    final_stats = risk_mgr.settle_simulation_tickets(rng_seed=42)
-    print_summary_table(risk_mgr, final_stats)
+    final_stats = risk_mgr.update_and_settle_real_tickets(viva_client.live_match_map)
+    print_tickets_table(
+        risk_mgr,
+        final_stats,
+        title="\nBẢNG THEO DÕI VÉ ĐANG CHẠY (RUNNING) & ĐÃ KẾT TOÁN TRÊN VIVA88",
+    )
     console.print(
         f"[dim]Đã lưu sổ cái: {risk_mgr.ledger_path} | File log: logs/abitrade.log & logs/audit_metrics.jsonl[/dim]"
     )

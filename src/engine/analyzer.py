@@ -149,6 +149,8 @@ class SignalAnalyzer:
 
         signal_type = "STEAM_MOVE" if is_steam else "VALUE_+EV"
         return ValueSignal(
+            match_id=viva_line.match_id,
+            saba_id=viva_line.saba_id,
             match_key=match_key,
             league=viva_line.league,
             home_team=viva_line.home_team,
@@ -166,5 +168,10 @@ class SignalAnalyzer:
             steam_drop=steam_drop,
             signal_type=signal_type,
             recommended_stake=stake,
+            score_home=viva_line.score_home,
+            score_away=viva_line.score_away,
+            corners_home=viva_line.corners_home,
+            corners_away=viva_line.corners_away,
+            minute=viva_line.minute,
             raw_line_id=viva_line.raw_line_id,
         )
