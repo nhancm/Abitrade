@@ -8,9 +8,9 @@ bankroll:
   round_step: 5              # Làm tròn tiền cược (bội số của 5) chống soi tài khoản
 
 strategy:
-  min_win_prob: 0.56         # Tỉ lệ thắng thực tối thiểu (56% - 68%)
+  min_win_prob: 0.595        # Nâng ngưỡng Winrate thực tối thiểu lên 59.5% (Loại bỏ vùng nhiễu 58.0%-58.5% từ log VPS)
   max_win_prob: 0.75         # Tránh kèo ăn quá thấp (Odds < 1.33)
-  min_ev_percent: 3.0        # Lợi nhuận kỳ vọng tối thiểu (+3% EV)
+  min_ev_percent: 4.2        # Nâng lợi nhuận kỳ vọng tối thiểu lên +4.2% EV (Tập trung các kèo chất lượng cao)
   steam_drop_ticks: 0.08     # Bắt sóng Steam khi Pinnacle tụt >= 8 xu trong < 120s
   steam_window_sec: 120
   one_shot_per_market: true  # BẮT BUỘC: Chỉ đánh 1 cửa/trận/loại kèo, không bù khi nhảy line

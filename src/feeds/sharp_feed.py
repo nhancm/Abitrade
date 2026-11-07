@@ -64,18 +64,21 @@ class SharpFeedClient:
 
             elif v.market_type == MarketType.HDP:
                 if v.phase == MatchPhase.LIVE:
-                    # Ưu tiên đội chủ nhà đang hòa hoặc bị dẫn 1 bàn nhưng ép sân mạnh (chống bẫy đội đã dẫn 2-3 bàn đá chậm)
+                    # Rút kinh nghiệm từ Log VPS:
+                    # 1. CẤM đánh HDP HOME -0.5 khi Chủ nhà ĐÃ DẪN BÀN (score_diff >= 1) vì Chủ nhà sẽ lùi sâu bảo toàn tỉ số 1-0 (thua kèo Rung!)
+                    # 2. CẤM đánh HDP HOME -0.5 khi Chủ nhà đang bị dẫn (score_diff < 0) để nhường suất 1-trận-1-vé cho kèo Tài Bàn Thắng (LIVE OU OVER)!
+                    # 3. Chỉ đánh HDP HOME -0.5 khi tỉ số ĐANG HÒA (0-0 hoặc 1-1), Chủ nhà không bị thẻ đỏ, và áp đảo toàn diện (SOT hơn >= 3, Góc hơn >= 2)
                     score_diff = v.score_home - v.score_away
-                    if score_diff >= 2:
-                        true_prob = 0.46
+                    red_h = int(h.get("RedCard", 0))
+                    if score_diff != 0 or red_h > 0 or (sot_h - sot_a) < 3 or (crn_h - crn_a) < 2:
+                        true_prob = 0.45
                     else:
-                        dom_da = (da_h - da_a) / max(12, elapsed)
-                        dom_sot = (sot_h - sot_a) / max(12, elapsed)
-                        dom_score = (dom_da * 0.8 + dom_sot * 2.2) * math.sqrt(remaining_ratio)
-                        true_prob = min(0.65, max(0.45, 0.48 + dom_score * 0.30))
+                        dom_da = (da_h - da_a) / max(25, elapsed)
+                        dom_sot = (sot_h - sot_a) / max(25, elapsed)
+                        dom_score = (dom_da * 0.75 + dom_sot * 2.1) * math.sqrt(remaining_ratio)
+                        true_prob = min(0.64, max(0.45, 0.48 + dom_score * 0.28))
                 else:
-                    is_strong_home = (int(m.get("MatchId", 0)) % 9 == 0)
-                    true_prob = 0.615 if is_strong_home else 0.50
+                    true_prob = 0.50
             else:
                 true_prob = 0.50
 
