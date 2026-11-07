@@ -1,0 +1,38 @@
+mode: "simulation"  # "simulation" (Giả lập Paper Trade) hoặc "live" (Đặt tiền thật Viva88)
+
+bankroll:
+  initial_capital: 10000.0   # Vốn khởi điểm (điểm / USD)
+  kelly_fraction: 0.25       # 1/4 Kelly để an toàn vốn khi đánh 1 cửa
+  min_stake: 10.0            # Cược tối thiểu mỗi mã
+  max_stake_percent: 3.0     # Tối đa 3% tổng vốn cho 1 mã cược
+  round_step: 5              # Làm tròn tiền cược (bội số của 5) chống soi tài khoản
+
+strategy:
+  min_win_prob: 0.56         # Tỉ lệ thắng thực tối thiểu (56% - 68%)
+  max_win_prob: 0.75         # Tránh kèo ăn quá thấp (Odds < 1.33)
+  min_ev_percent: 3.0        # Lợi nhuận kỳ vọng tối thiểu (+3% EV)
+  steam_drop_ticks: 0.08     # Bắt sóng Steam khi Pinnacle tụt >= 8 xu trong < 120s
+  steam_window_sec: 120
+  one_shot_per_market: true  # BẮT BUỘC: Chỉ đánh 1 cửa/trận/loại kèo, không bù khi nhảy line
+  markets_enabled:
+    - "HDP"                  # Kèo chấp Châu Á
+    - "OU"                   # Tài Xỉu bàn thắng
+    - "CORNER_OU"            # Tài Xỉu phạt góc
+    - "CORNER_HDP"           # Chấp phạt góc
+  phases_enabled:
+    - "PREMATCH"
+    - "LIVE"
+
+sharp_feed:
+  provider: "hybrid"         # "the_odds_api" | "pinnacle_public" | "hybrid"
+  the_odds_api_key: ""       # Điền free key từ https://the-odds-api.com (500 req/tháng miễn phí)
+  poll_interval_sec: 5
+
+viva88:
+  base_url: "https://www.viva88.net"
+  agent_url: "https://agn.viva88.net"
+  username: "YOUR_VIVA88_USER"
+  password: "YOUR_VIVA88_PASS"
+  odds_type: "DEC"           # Quy đổi nội bộ về Decimal để tính toán chuẩn xác
+  max_slippage: 0.02         # Hủy lệnh nếu lúc GetTicket giá Viva88 tụt quá 2 xu
+  live_waiting_delay_sec: 3  # Giả lập thời gian Saba treo vé "Waiting" khi đánh kèo Rung

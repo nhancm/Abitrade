@@ -1,0 +1,10 @@
+{
+  "bankroll": 10108.6,
+  "locked_markets": [
+    "arsenal_vs_brighton_hove_albion::HDP",
+    "madrid_vs_getafe::CORNER_HDP",
+    "melbourne_victory_vs_sydney::CORNER_OU"
+  ],
+  "total_tickets": 0,
+  "tickets": []
+}
