@@ -1,6 +1,9 @@
 import argparse
 import asyncio
 from datetime import datetime
+import json
+import logging
+from logging.handlers import RotatingFileHandler
 import os
 import sys
 import yaml
@@ -18,6 +21,29 @@ from src.feeds.sharp_feed import SharpFeedClient
 from src.feeds.viva88_client import Viva88Client
 
 console = Console()
+
+
+def setup_logger(log_dir: str = "logs") -> logging.Logger:
+    os.makedirs(log_dir, exist_ok=True)
+    logger = logging.getLogger("abitrade")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        handler = RotatingFileHandler(
+            os.path.join(log_dir, "abitrade.log"),
+            maxBytes=2 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    return logger
+
+
+def append_audit_jsonl(record: dict, path: str = "logs/audit_metrics.jsonl") -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def load_config(path: str = "config/settings.yaml") -> dict:
@@ -72,6 +98,7 @@ def print_summary_table(risk_mgr: RiskManager, stats: dict) -> None:
 
 async def run_continuous_bot(max_cycles: int = 0) -> None:
     cfg = load_config()
+    logger = setup_logger()
     poll_interval = float(cfg["sharp_feed"].get("poll_interval_sec", 5))
     sharp_client = SharpFeedClient(cfg)
     viva_client = Viva88Client(cfg)
@@ -79,6 +106,10 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
     risk_mgr = RiskManager(cfg)
 
     await viva_client.login()
+    logger.info(
+        f"START BOT | mode={cfg['mode']} | bankroll={risk_mgr.bankroll:.2f} | "
+        f"min_win_prob={cfg['strategy']['min_win_prob']} | min_ev={cfg['strategy']['min_ev_percent']}%"
+    )
 
     console.print(
         Panel.fit(
@@ -87,6 +118,7 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
             f"Điều kiện nổ kèo: [yellow]Winrate thực >= {cfg['strategy']['min_win_prob']*100:.0f}%[/yellow] & "
             f"[yellow]+EV >= {cfg['strategy']['min_ev_percent']}%[/yellow]\n"
             f"• Quy tắc kỷ luật: [bold magenta]Chỉ đánh 1 cửa duy nhất mỗi trận/loại kèo (Không bù khi nhảy line)[/bold magenta]\n"
+            f"• File Log tối ưu: [bold green]logs/abitrade.log[/bold green] & [bold green]logs/audit_metrics.jsonl[/bold green]\n"
             f"• Chu kỳ quét: [bold white]{poll_interval:.0f} giây/lần[/bold white] | "
             f"Nhấn tổ hợp phím [bold red]Ctrl + C[/bold red] bất cứ lúc nào để dừng và xem bảng tổng kết.",
             border_style="cyan",
@@ -117,6 +149,9 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
 
             # BƯỚC 2 & 3: Phân tích từng cặp & Đặt cược
             new_bets_this_tick = 0
+            skipped_low_ev = 0
+            skipped_locked = 0
+
             for match_key, s_line, v_line in paired:
                 true_prob, fair_odds = analyzer.devig_power(
                     s_line.odds_dec, s_line.opposite_odds_dec
@@ -133,6 +168,12 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
 
                 # Nếu không đạt tiêu chuẩn Winrate hoặc +EV, in rõ lý do lọc bỏ
                 if not signal:
+                    skipped_low_ev += 1
+                    logger.info(
+                        f"CYCLE #{tick+1} | SKIP_FILTER | {v_line.home_team} vs {v_line.away_team} | "
+                        f"{v_line.phase.value} {v_line.market_type.value} {v_line.side} {v_line.line} | "
+                        f"sharp_dec={s_line.odds_dec:.2f} viva_hk={viva_hk:.2f} | win_prob={true_prob*100:.1f}% ev={ev_pct:+.2f}%"
+                    )
                     console.print(
                         f"     [dim]• [BỎ QUA - KHÔNG ĐỦ ĐIỀU KIỆN] {v_line.home_team} vs {v_line.away_team} "
                         f"({v_line.market_type.value} {v_line.side} {v_line.line}) | "
@@ -142,6 +183,11 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
 
                 # Nếu đạt tiêu chuẩn nhưng trận này đã đánh 1 mã trước đó -> Khóa 1 cửa
                 if not risk_mgr.can_place_bet(signal):
+                    skipped_locked += 1
+                    logger.info(
+                        f"CYCLE #{tick+1} | SKIP_LOCKED_1SHOT | {signal.home_team} vs {signal.away_team} | "
+                        f"{signal.market_type.value} {signal.side} {signal.line} | ev={signal.ev_percent:+.2f}%"
+                    )
                     console.print(
                         f"     [yellow]• [ĐÃ KHÓA 1 CỬA - KHÔNG BÙ KÈO] {signal.home_team} vs {signal.away_team} "
                         f"({signal.market_type.value} {signal.side} {signal.line}) - Đã có vé trên trận này.[/yellow]"
@@ -152,6 +198,12 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
                 ticket = await viva_client.place_single_bet(signal)
                 risk_mgr.register_ticket(signal, ticket)
                 new_bets_this_tick += 1
+                logger.info(
+                    f"CYCLE #{tick+1} | BET_PLACED | id={ticket.ticket_id} | type={signal.signal_type} | "
+                    f"{ticket.match_name} | {ticket.phase.value} {ticket.market_type.value} {ticket.selection} | "
+                    f"odds_dec={ticket.odds_accepted:.2f} (hk={signal.viva88_hk_odds:.2f}) | "
+                    f"win_prob={signal.true_win_prob*100:.1f}% | ev=+{signal.ev_percent:.2f}% | stake={ticket.stake:.0f}"
+                )
                 console.print(
                     f"     [bold green]★ [NỔ LỆNH {ticket.ticket_id} - {signal.signal_type}][/bold green] "
                     f"[bold white]{ticket.match_name}[/bold white] | "
@@ -163,6 +215,30 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
 
             # BƯỚC 4: Kết toán giả lập & Hiển thị trạng thái ví
             stats = risk_mgr.settle_simulation_tickets(rng_seed=42 + tick)
+            logger.info(
+                f"CYCLE #{tick+1} | SUMMARY | paired={len(paired)} new_bets={new_bets_this_tick} "
+                f"skip_filter={skipped_low_ev} skip_locked={skipped_locked} | "
+                f"settled={stats['settled']} won={stats['won']} lost={stats['lost']} "
+                f"win_rate={stats['win_rate']}% net_profit={stats['net_profit']:+.2f} "
+                f"roi={stats['roi']:+.2f}% bankroll={stats['bankroll']:.2f}"
+            )
+            append_audit_jsonl(
+                {
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "cycle": tick + 1,
+                    "paired_count": len(paired),
+                    "new_bets": new_bets_this_tick,
+                    "skipped_filter": skipped_low_ev,
+                    "skipped_locked": skipped_locked,
+                    "settled": stats["settled"],
+                    "won": stats["won"],
+                    "lost": stats["lost"],
+                    "win_rate": stats["win_rate"],
+                    "net_profit": stats["net_profit"],
+                    "roi": stats["roi"],
+                    "bankroll": stats["bankroll"],
+                }
+            )
             console.print(
                 f"  [cyan]2. Trạng thái Ví Paper Trade:[/cyan] Vé mới: [bold]{new_bets_this_tick}[/bold] | "
                 f"Tổng vé đã vào: [bold]{stats['settled']}[/bold] "
@@ -182,11 +258,14 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
             await asyncio.sleep(poll_interval)
 
     except (KeyboardInterrupt, asyncio.CancelledError):
+        logger.info("STOP BOT | User pressed Ctrl+C")
         console.print("\n[bold yellow]>>> Đã nhận lệnh dừng (Ctrl + C) từ người dùng![/bold yellow]")
 
     final_stats = risk_mgr.settle_simulation_tickets(rng_seed=42)
     print_summary_table(risk_mgr, final_stats)
-    console.print(f"[dim]Đã lưu toàn bộ lịch sử vé vào: {risk_mgr.ledger_path}[/dim]")
+    console.print(
+        f"[dim]Đã lưu sổ cái: {risk_mgr.ledger_path} | File log: logs/abitrade.log & logs/audit_metrics.jsonl[/dim]"
+    )
 
 
 if __name__ == "__main__":
