@@ -24,6 +24,7 @@ class Viva88Client:
     def __init__(self, config: dict):
         self.mode = config.get("mode", "simulation")
         self.cfg = config["viva88"]
+        self.strat_cfg = config.get("strategy", {})
         self.base_url = self.cfg.get("base_url", "https://www.viva88.net")
         self.username = self.cfg.get("username", "")
         self.password = self.cfg.get("password", "")
