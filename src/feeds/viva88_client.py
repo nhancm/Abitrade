@@ -198,11 +198,18 @@ class Viva88Client:
                 )
             )
 
-            # 2. Kèo Tài Xỉu Phạt Góc (CORNER_OU) nếu trận có thống kê góc
+            # 2. Kèo Tài Xỉu Phạt Góc (CORNER_OU) nếu trận có thống kê góc (Mốc Saba hạ dần theo phút thi đấu)
             total_corners = ch + ca
             if phase == MatchPhase.LIVE and total_corners > 0:
-                crn_line = float(total_corners) + 3.5
-                viva_hk_crn = 0.74
+                mt_val = int(mt or 30)
+                if mt_val <= 45:
+                    crn_add = 3.5
+                elif mt_val <= 56:
+                    crn_add = 3.0
+                else:
+                    crn_add = 2.5
+                crn_line = float(total_corners) + crn_add
+                viva_hk_crn = 0.76
                 lines.append(
                     OddsLine(
                         source="VIVA88",

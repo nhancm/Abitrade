@@ -1,4 +1,4 @@
 # STATE HANDOFF (Zer0mem)
-1. **Đã hoàn thành**: Xây dựng hệ thống Autobet 1 cửa Viva88 (`src/`, `config/settings.yaml`, `README.md`), kiểm thử Paper Trade thành công và đã push lên `https://github.com/nhancm/Abitrade.git` (nhánh `main`).
-2. **Trạng thái hiện tại**: Đang chạy ở chế độ `simulation` (Paper Trade) với bộ lọc `Winrate >= 56%`, `+EV >= 3%`, `1/4 Kelly` và khóa chặt 1 cửa (`one_shot_per_market: true`).
-3. **Task tiếp theo**: Tích hợp phiên đăng nhập HTTP/Socket thực tế của Viva88 (Member/Agent) để quét bảng kèo Saba thời gian thực và kết nối Telegram Bot báo tín hiệu.
+1. **Đã hoàn thành**: Phân tích nhật ký Local đến Chu kỳ #535 (65 vé: 26 Thắng, 27 Thua, 2 PUSH, 10 RUNNING). Phát hiện nhóm trận Hiệp 2 đã có `>= 2 bàn` & `OnGoal >= 3` đạt **Winrate 83.3% (+571.1 đ)**, trong khi các trận `0-0 / 1-0` có `OnGoal = 0` nhưng nhiều Phạt góc bị cộng nhầm góc vào chỉ số sút trúng đích.
+2. **Trạng thái hiện tại**: Đã tách bạch công thức Bàn thắng (`OnGoal >= 2`, Hiệp 2 sau 52' yêu cầu `tổng bàn >= 2` hoặc `OnGoal >= 4`) và điều hướng trận nhiều góc sang `LIVE CORNER_OU OVER` (mốc góc động `+3.5/+3.0/+2.5`), giải phóng vé Pre-match cũ treo (`#14 BW Linz`), và khử trùng lặp log `[ĐÃ KHÓA 1 CỬA]`.
+3. **Task tiếp theo**: Bấm `Ctrl + C` trên cửa sổ Local và chạy lại `python src/main.py` để nạp code mới (tự động giải phóng vé `#14 BW Linz` và áp dụng bộ lọc `OnGoal >= 2` + `CORNER_OU` động).

@@ -114,15 +114,24 @@ class RiskManager:
             return f"MATCH::{signal.match_id}"
         return f"{signal.match_id}::{signal.market_type.value}"
 
-    def can_place_bet(self, signal: ValueSignal) -> bool:
-        running_now = sum(1 for t in self.tickets if t.status == BetStatus.RUNNING)
-        if running_now >= self.max_running_tickets:
+    def is_match_locked(self, signal: ValueSignal) -> bool:
+        if not self.one_shot_only:
             return False
-        if self.one_shot_only:
-            if self.lock_key(signal) in self.locked_markets:
-                return False
-            if f"{signal.match_id}::{signal.market_type.value}" in self.locked_markets:
-                return False
+        if self.lock_key(signal) in self.locked_markets:
+            return True
+        if f"{signal.match_id}::{signal.market_type.value}" in self.locked_markets:
+            return True
+        return False
+
+    def is_max_running_reached(self) -> bool:
+        running_now = sum(1 for t in self.tickets if t.status == BetStatus.RUNNING)
+        return running_now >= self.max_running_tickets
+
+    def can_place_bet(self, signal: ValueSignal) -> bool:
+        if self.is_max_running_reached():
+            return False
+        if self.is_match_locked(signal):
+            return False
         if signal.recommended_stake > self.bankroll:
             return False
         return True
@@ -186,6 +195,15 @@ class RiskManager:
                 t.current_minute = f"2H {mt or 46}'"
             elif st == 50:
                 t.current_minute = "FT"
+
+            # Giải phóng vé PREMATCH cũ chưa đá (Status == 0) hoặc trận bị hoãn/hủy (Status == 60) để không chiếm slot RUNNING
+            if st in (0, 60):
+                t.status = BetStatus.PUSH
+                t.pnl = 0.0
+                self.bankroll += t.stake
+                t.note = "Hoàn tiền PUSH (Giải phóng vé Pre-match chưa đá / Trận hoãn để mở slot RUNNING)"
+                self.newly_settled.append(t)
+                continue
 
             # Kiểm tra điều kiện VAR hủy bàn thắng (Khi tổng bàn hiện tại thấp hơn tổng bàn lúc vào vé) -> Saba Void/PUSH vé
             total_goals = sh + sa

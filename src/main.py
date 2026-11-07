@@ -204,21 +204,39 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
 
             # Ưu tiên chọn kèo có lợi nhuận kỳ vọng (+EV%) cao nhất trước
             candidate_signals.sort(key=lambda s: s.ev_percent, reverse=True)
+            logged_locked_saba = set()
+            logged_max_running = False
 
             for signal in candidate_signals:
                 if stop_event.is_set():
                     break
+                if risk_mgr.is_match_locked(signal):
+                    skipped_locked += 1
+                    if signal.saba_id not in logged_locked_saba:
+                        logged_locked_saba.add(signal.saba_id)
+                        logger.info(
+                            f"CYCLE #{tick+1} | SKIP_LOCKED_1SHOT | Saba:{signal.saba_id} | {signal.home_team} vs {signal.away_team} | "
+                            f"{signal.market_type.value} {signal.side} {signal.line}"
+                        )
+                        console.print(
+                            f"     [yellow]• [ĐÃ KHÓA 1 CỬA] (Saba:{signal.saba_id}) [{signal.league}] "
+                            f"{signal.home_team} vs {signal.away_team} ({signal.minute}, Tỉ số {signal.score_home}-{signal.score_away}) "
+                            f"— Đã có vé trên trận này.[/yellow]"
+                        )
+                    continue
+
+                if risk_mgr.is_max_running_reached():
+                    skipped_locked += 1
+                    if not logged_max_running:
+                        logged_max_running = True
+                        console.print(
+                            f"     [dim yellow]• [TẠM NGƯNG VÀO VÉ MỚI] Đang chạy tối đa {risk_mgr.max_running_tickets}/{risk_mgr.max_running_tickets} vé RUNNING "
+                            f"(Bỏ qua {signal.home_team} vs {signal.away_team} {signal.market_type.value} {signal.side} {signal.line} chờ vé cũ chốt FT).[/dim yellow]"
+                        )
+                    continue
+
                 if not risk_mgr.can_place_bet(signal):
                     skipped_locked += 1
-                    logger.info(
-                        f"CYCLE #{tick+1} | SKIP_LOCKED_1SHOT | Saba:{signal.saba_id} | {signal.home_team} vs {signal.away_team} | "
-                        f"{signal.market_type.value} {signal.side} {signal.line}"
-                    )
-                    console.print(
-                        f"     [yellow]• [ĐÃ KHÓA 1 CỬA] (Saba:{signal.saba_id}) [{signal.league}] "
-                        f"{signal.home_team} vs {signal.away_team} ({signal.minute}, Tỉ số {signal.score_home}-{signal.score_away}) "
-                        f"— Đã có vé trên trận này.[/yellow]"
-                    )
                     continue
 
                 ticket = await viva_client.place_single_bet(signal)
