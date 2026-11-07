@@ -63,6 +63,7 @@ class RiskManager:
                                 note=item.get("note", ""),
                             )
                         )
+                        self.locked_markets.add(f"MATCH::{item['match_id']}")
         except Exception:
             pass
 
@@ -101,8 +102,10 @@ class RiskManager:
                 for t in self.tickets
             ],
         }
-        with open(self.ledger_path, "w", encoding="utf-8") as f:
+        tmp_path = f"{self.ledger_path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_path, self.ledger_path)
 
     def lock_key(self, signal: ValueSignal) -> str:
         if self.one_bet_per_match:

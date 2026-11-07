@@ -5,6 +5,7 @@ import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
+import signal
 import sys
 import yaml
 from rich.console import Console
@@ -134,8 +135,17 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
     )
 
     tick = 0
+    stop_event = asyncio.Event()
+
+    def _on_sigint(signum, frame):
+        stop_event.set()
+
+    signal.signal(signal.SIGINT, _on_sigint)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, _on_sigint)
+
     try:
-        while True:
+        while not stop_event.is_set():
             if max_cycles > 0 and tick >= max_cycles:
                 break
 
@@ -146,6 +156,8 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
 
             # BƯỚC 1: Lấy danh sách trận đấu THẬT đang mở trên sảnh Saba của Viva88
             viva_lines = await viva_client.fetch_viva88_lines(tick=tick)
+            if stop_event.is_set():
+                break
             saba_matches = list(viva_client.live_match_map.values())
             sharp_lines = sharp_client.build_sharp_lines_from_real_matches(
                 saba_matches=saba_matches, viva_lines=viva_lines, tick=tick
@@ -180,6 +192,8 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
             candidate_signals.sort(key=lambda s: s.ev_percent, reverse=True)
 
             for signal in candidate_signals:
+                if stop_event.is_set():
+                    break
                 if not risk_mgr.can_place_bet(signal):
                     skipped_locked += 1
                     logger.info(
@@ -251,21 +265,26 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
             console.print(
                 f"  [dim]Đang theo dõi tỉ số trực tiếp trên Viva88 (Cập nhật sau {poll_interval:.0f}s — Bấm Ctrl + C để dừng)...[/dim]"
             )
-            await asyncio.sleep(poll_interval)
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=poll_interval)
+            except asyncio.TimeoutError:
+                pass
 
     except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+    finally:
         logger.info("STOP BOT | User pressed Ctrl+C")
-        console.print("\n[bold yellow]>>> Đã nhận lệnh dừng (Ctrl + C) từ người dùng![/bold yellow]")
-
-    final_stats = risk_mgr.update_and_settle_real_tickets(viva_client.live_match_map)
-    print_tickets_table(
-        risk_mgr,
-        final_stats,
-        title="\nBẢNG THEO DÕI VÉ ĐANG CHẠY (RUNNING) & ĐÃ KẾT TOÁN TRÊN VIVA88",
-    )
-    console.print(
-        f"[dim]Đã lưu sổ cái: {risk_mgr.ledger_path} | File log: logs/abitrade.log & logs/audit_metrics.jsonl[/dim]"
-    )
+        console.print("\n[bold yellow]>>> Đã dừng chương trình an toàn (Ctrl + C)![/bold yellow]")
+        await viva_client.close()
+        final_stats = risk_mgr.update_and_settle_real_tickets(viva_client.live_match_map)
+        print_tickets_table(
+            risk_mgr,
+            final_stats,
+            title="\nBẢNG THEO DÕI VÉ ĐANG CHẠY (RUNNING) & ĐÃ KẾT TOÁN TRÊN VIVA88",
+        )
+        console.print(
+            f"[dim]Đã lưu sổ cái: {risk_mgr.ledger_path} | File log: logs/abitrade.log & logs/audit_metrics.jsonl[/dim]"
+        )
 
 
 if __name__ == "__main__":

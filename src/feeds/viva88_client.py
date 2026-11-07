@@ -62,6 +62,14 @@ class Viva88Client:
         self.session_token = f"V88_{self.username}_{uuid.uuid4().hex[:6].upper()}"
         return True
 
+    async def close(self) -> None:
+        if self._http is not None:
+            try:
+                await self._http.aclose()
+            except Exception:
+                pass
+            self._http = None
+
     async def fetch_real_saba_matches(self) -> List[dict]:
         """Lấy toàn bộ danh sách trận đấu thực tế có trên sảnh Saba của Viva88 hôm nay."""
         if not self._http:
