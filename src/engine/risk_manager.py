@@ -195,15 +195,19 @@ class RiskManager:
             ch = int(h.get("CornerKick", 0))
             ca = int(a.get("CornerKick", 0))
 
+            prev_min = t.current_minute or ""
+            was_in_2h = prev_min.startswith("2H")
+            is_extra_time = (was_in_2h and st == 20) or (mt is not None and int(mt or 0) > 95)
+
             t.current_score = f"{sh}-{sa}"
             t.current_corners = f"{ch}-{ca}"
             if st == 10:
                 t.current_minute = f"1H {mt or 1}'"
-            elif st == 20:
+            elif st == 20 and not was_in_2h:
                 t.current_minute = "HT"
-            elif st == 30:
+            elif st == 30 and not is_extra_time:
                 t.current_minute = f"2H {mt or 46}'"
-            elif st == 50:
+            elif st == 50 or is_extra_time:
                 t.current_minute = "FT"
 
             # Giải phóng vé PREMATCH cũ chưa đá (Status == 0) hoặc trận bị hoãn/hủy (Status == 60) để không chiếm slot RUNNING
@@ -246,8 +250,8 @@ class RiskManager:
                 self.newly_settled.append(t)
                 continue
 
-            # Chỉ kết toán khi trận đấu đã FT (Status == 50) hoặc cửa OVER đã nổ đủ bàn ăn sớm
-            if st != 50 and not early_over_win:
+            # Chỉ kết toán khi trận đấu đã FT 90 phút (Status == 50 hoặc bước sang nghỉ Hiệp Phụ sau Hiệp 2) hoặc cửa OVER đã nổ đủ bàn ăn sớm
+            if st != 50 and not is_extra_time and not early_over_win:
                 continue
 
             if t.market_type == MarketType.OU:

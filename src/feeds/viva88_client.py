@@ -134,7 +134,13 @@ class Viva88Client:
             away = a_info.get("NameEn") or a_info.get("NameCn") or "Away"
 
             st = m.get("Status", 0)
-            phase = MatchPhase.LIVE if st in (10, 20, 30) else MatchPhase.PREMATCH
+            # Chỉ vào kèo khi bóng đang lăn thực tế trong Hiệp 1 (10) hoặc Hiệp 2 (30) của 90 phút chính thức.
+            # TUYỆT ĐỐI KHÔNG vào kèo lúc nghỉ (Status == 20) vì các giải Cúp hết 90' chuyển sang nghỉ chờ Hiệp Phụ cũng trả Status == 20 (MatchTime == 0)!
+            if st not in (10, 30):
+                continue
+            if int(h_info.get("ExtractScore", 0)) + int(a_info.get("ExtractScore", 0)) > 0:
+                continue
+            phase = MatchPhase.LIVE
             sh = int(h_info.get("FullScore", 0))
             sa = int(a_info.get("FullScore", 0))
             ch = int(h_info.get("CornerKick", 0))
@@ -143,7 +149,7 @@ class Viva88Client:
             da_total = int(h_info.get("DangerAttack", 0)) + int(a_info.get("DangerAttack", 0))
             sot_total = int(h_info.get("OnGoal", 0)) + int(a_info.get("OnGoal", 0))
             miss_total = int(h_info.get("MissGoal", 0)) + int(a_info.get("MissGoal", 0))
-            mt = int(m.get("MatchTime") or (45 if st == 20 else 0))
+            mt = int(m.get("MatchTime") or 0)
             minute_str = self.format_minute(m)
 
             # BỘ LỌC BẢO VỆ VỐN KÈO LIVE:

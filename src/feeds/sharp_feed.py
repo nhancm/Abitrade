@@ -31,7 +31,7 @@ class SharpFeedClient:
             h = m.get("HomeTeam", {})
             a = m.get("AwayTeam", {})
             st = m.get("Status", 0)
-            mt = int(m.get("MatchTime") or (45 if st == 20 else 0))
+            mt = int(m.get("MatchTime") or 0)
 
             # Lấy thông số áp lực thực tế trên sân (Kết hợp DangerAttack, Attack, OnGoal, MissGoal, CornerKick)
             atk_h = int(h.get("Attack", 0))
