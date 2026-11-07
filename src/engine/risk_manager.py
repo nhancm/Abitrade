@@ -25,6 +25,7 @@ class RiskManager:
         self.locked_markets: Set[str] = set()
         self.tickets: List[BetTicket] = []
         self.newly_settled: List[BetTicket] = []
+        self.missing_ticks: Dict[str, int] = {}
         self._load_ledger()
 
     def _load_ledger(self) -> None:
@@ -174,7 +175,16 @@ class RiskManager:
 
             m = live_match_map.get(t.match_id)
             if not m:
+                self.missing_ticks[t.ticket_id] = self.missing_ticks.get(t.ticket_id, 0) + 1
+                if self.missing_ticks[t.ticket_id] >= 24:
+                    # Nếu Viva88 đã dọn trận khỏi bảng Today sau khi sang ngày mới (>= 24 chu kỳ liên tiếp không còn trên bảng)
+                    t.status = BetStatus.PUSH
+                    t.pnl = 0.0
+                    self.bankroll += t.stake
+                    t.note = "Hoàn tiền PUSH (Trận đấu đã đóng bảng ngày trên Viva88)"
+                    self.newly_settled.append(t)
                 continue
+            self.missing_ticks.pop(t.ticket_id, None)
 
             h = m.get("HomeTeam", {})
             a = m.get("AwayTeam", {})
