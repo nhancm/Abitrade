@@ -33,34 +33,37 @@ class SharpFeedClient:
             st = m.get("Status", 0)
             mt = int(m.get("MatchTime") or (45 if st == 20 else 0))
 
-            # Lấy thông số áp lực thực tế trên sân (Live Momentum)
+            # Lấy thông số áp lực thực tế trên sân (Kết hợp DangerAttack, Attack, OnGoal, MissGoal, CornerKick)
+            atk_h = int(h.get("Attack", 0))
+            atk_a = int(a.get("Attack", 0))
             da_h = int(h.get("DangerAttack", 0))
             da_a = int(a.get("DangerAttack", 0))
             sot_h = int(h.get("OnGoal", 0))
             sot_a = int(a.get("OnGoal", 0))
+            miss_h = int(h.get("MissGoal", 0))
+            miss_a = int(a.get("MissGoal", 0))
             crn_h = int(h.get("CornerKick", 0))
             crn_a = int(a.get("CornerKick", 0))
 
-            total_da = da_h + da_a
-            total_sot = sot_h + sot_a
-            elapsed = max(25, mt) if v.phase == MatchPhase.LIVE else 0
+            # Quy chuẩn nhịp độ tấn công cho cả giải Châu Á (nhiều DA) và giải Châu Âu (nhiều Attack/Corner/Shot)
+            total_da = max(da_h + da_a, int((atk_h + atk_a) * 1.35) + (crn_h + crn_a) * 2)
+            total_sot = (sot_h + sot_a) + int((miss_h + miss_a) * 0.45) + int((crn_h + crn_a) * 0.35)
+            elapsed = max(28, mt) if v.phase == MatchPhase.LIVE else 0
 
             if v.market_type == MarketType.OU:
                 if v.phase == MatchPhase.LIVE:
-                    # Vì mốc kèo Saba (ou_line) đã tự động hạ từ +1.5 (H1) xuống +1.0 / +0.75 (H2) theo phút,
-                    # ta tính trực tiếp áp lực tấn công mỗi phút (không phạt kép hệ số thời gian còn lại)
                     da_per_min = total_da / elapsed
                     sot_per_min = total_sot / elapsed
-                    pressure_score = (da_per_min * 0.70) + (sot_per_min * 2.60)
-                    true_prob = min(0.66, max(0.45, 0.45 + (pressure_score - 0.50) * 0.30))
+                    pressure_score = (da_per_min * 0.65) + (sot_per_min * 2.50)
+                    true_prob = min(0.65, max(0.45, 0.45 + (pressure_score - 0.52) * 0.30))
                 else:
                     true_prob = 0.50
 
             elif v.market_type == MarketType.CORNER_OU:
-                crn_per_min = (crn_h + crn_a) / max(25, elapsed)
-                da_per_min = total_da / max(25, elapsed)
-                corner_pressure = (crn_per_min * 3.8) + (da_per_min * 0.45)
-                true_prob = min(0.65, max(0.46, 0.46 + (corner_pressure - 0.60) * 0.24))
+                crn_per_min = (crn_h + crn_a) / max(28, elapsed)
+                da_per_min = total_da / max(28, elapsed)
+                corner_pressure = (crn_per_min * 3.9) + (da_per_min * 0.40)
+                true_prob = min(0.65, max(0.46, 0.46 + (corner_pressure - 0.62) * 0.24))
 
             elif v.market_type == MarketType.HDP:
                 if v.phase == MatchPhase.LIVE:

@@ -139,25 +139,27 @@ class Viva88Client:
             sa = int(a_info.get("FullScore", 0))
             ch = int(h_info.get("CornerKick", 0))
             ca = int(a_info.get("CornerKick", 0))
+            atk_total = int(h_info.get("Attack", 0)) + int(a_info.get("Attack", 0))
             da_total = int(h_info.get("DangerAttack", 0)) + int(a_info.get("DangerAttack", 0))
             sot_total = int(h_info.get("OnGoal", 0)) + int(a_info.get("OnGoal", 0))
+            miss_total = int(h_info.get("MissGoal", 0)) + int(a_info.get("MissGoal", 0))
             mt = int(m.get("MatchTime") or (45 if st == 20 else 0))
             minute_str = self.format_minute(m)
 
-            # BỘ LỌC BẢO VỆ VỐN KÈO LIVE (Tối ưu từ 937 chu kỳ thực chiến):
-            # 1. Khung giờ vàng: Chỉ vào từ phút 28' -> 68' (Tránh nhiễu đầu hiệp 1 & tránh câu giờ cuối hiệp 2)
-            # 2. Chặn trận vỡ (cách biệt >= 3 bàn) và chặn trận thiếu thống kê sút cầu môn (SOT < 2 hoặc DA < 22)
+            # BỘ LỌC BẢO VỆ VỐN KÈO LIVE:
+            # 1. Khung giờ vàng: Chỉ vào từ phút 28' -> 68' (Bao gồm cả giờ nghỉ HT = 45')
+            # 2. Chặn trận vỡ (cách biệt >= 3 bàn) và chặn trận mất kết nối thống kê (Effective Activity quá thấp)
             if phase == MatchPhase.LIVE:
                 min_mt = int(self.strat_cfg.get("live_min_minute", 28))
                 max_mt = int(self.strat_cfg.get("live_max_minute", 68))
                 max_diff = int(self.strat_cfg.get("max_live_goal_diff", 2))
-                min_sot = int(self.strat_cfg.get("min_live_sot", 2))
-                min_da = int(self.strat_cfg.get("min_live_da", 22))
                 if not (min_mt <= mt <= max_mt):
                     continue
                 if abs(sh - sa) > max_diff:
                     continue
-                if sot_total < min_sot or da_total < min_da:
+                eff_da = da_total + int(atk_total * 0.6) + ((ch + ca) * 3)
+                eff_sot = sot_total + int(miss_total * 0.5) + (sh + sa)
+                if eff_da < 18 or (eff_sot < 2 and (ch + ca) < 5):
                     continue
 
             # 1. Kèo Tài Xỉu Bàn Thắng (OU) dịch chuyển mốc Line động theo phút giống chuẩn Saba:
