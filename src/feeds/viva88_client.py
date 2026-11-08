@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta
 import json
 import re
 import uuid
@@ -20,6 +21,7 @@ class Viva88Client:
     DEFAULT_KEY_TOKEN = "EDA8F37E5E644977BB5358217A605757"
     DEFAULT_BEARER = "Bearer 4A4DE4245BB4EF6490A38F41F09F9250977394DC83C26538CA2F780145C6698C"
     MATCH_API_URL = "https://wonderfulnextapi.com/api/1.0/Match/Soccer/Today/"
+    MATCH_DATE_API_URL = "https://wonderfulnextapi.com/api/1.0/Match/Soccer/Date/"
 
     def __init__(self, config: dict):
         self.mode = config.get("mode", "simulation")
@@ -71,8 +73,8 @@ class Viva88Client:
                 pass
             self._http = None
 
-    async def fetch_real_saba_matches(self) -> List[dict]:
-        """Lấy toàn bộ danh sách trận đấu thực tế có trên sảnh Saba của Viva88 hôm nay."""
+    async def fetch_real_saba_matches(self, running_match_ids: Optional[List[str]] = None) -> List[dict]:
+        """Lấy toàn bộ danh sách trận đấu thực tế có trên sảnh Saba của Viva88 hôm nay (kèm tra cứu FT ngày cũ nếu vé vắt qua 11h trưa)."""
         if not self._http:
             await self.login()
         headers = {
@@ -87,10 +89,22 @@ class Viva88Client:
             if resp.status_code == 200:
                 data = resp.json()
                 all_matches = data.get("Result", {}).get("Match", [])
-                # Chỉ lọc các trận có mở kèo trên sảnh Saba (SabaId != null)
+                # Chỉ lọc các trận có mở kèo trên sảnh Saba (SabaId != null) và làm mới bản đồ ngày hiện tại
                 saba_matches = [m for m in all_matches if m.get("SabaId")]
-                for m in saba_matches:
-                    self.live_match_map[str(m["MatchId"])] = m
+                self.live_match_map = {str(m["MatchId"]): m for m in saba_matches}
+
+                # Nếu có vé RUNNING của ngày MeiDonDate hôm trước (vắt qua mốc 11:00 trưa), tra cứu kết quả FT từ API Date/
+                if running_match_ids:
+                    missing_ids = [mid for mid in running_match_ids if mid not in self.live_match_map]
+                    if missing_ids:
+                        yest_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+                        r_date = await self._http.post(self.MATCH_DATE_API_URL, headers=headers, json={"Date": yest_str})
+                        if r_date.status_code == 200:
+                            old_matches = r_date.json().get("Result", {}).get("Match", [])
+                            for om in old_matches:
+                                om_id = str(om.get("MatchId"))
+                                if om_id in missing_ids:
+                                    self.live_match_map[om_id] = om
                 return saba_matches
         except Exception:
             pass
@@ -110,12 +124,12 @@ class Viva88Client:
             return "FT"
         return f"Pre ({m.get('Schedule', '')})"
 
-    async def fetch_viva88_lines(self, tick: int = 0) -> List[OddsLine]:
+    async def fetch_viva88_lines(self, tick: int = 0, running_match_ids: Optional[List[str]] = None) -> List[OddsLine]:
         """
         Quét các trận đấu THẬT đang diễn ra (Live Status 10, 20, 30) và sắp đá (Status 0)
         trên bảng kèo Viva88 (Saba Sports) và tạo dòng kèo sát thực tế cho từng trận.
         """
-        saba_matches = await self.fetch_real_saba_matches()
+        saba_matches = await self.fetch_real_saba_matches(running_match_ids=running_match_ids)
         if not saba_matches:
             return []
 

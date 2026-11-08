@@ -155,8 +155,9 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
                 f"\n[bold white]━━━━━━━━━━━━━━━━ [Chu kỳ #{tick + 1} | {now_str}] ━━━━━━━━━━━━━━━━[/bold white]"
             )
 
-            # BƯỚC 1: Lấy danh sách trận đấu THẬT đang mở trên sảnh Saba của Viva88
-            viva_lines = await viva_client.fetch_viva88_lines(tick=tick)
+            # BƯỚC 1: Lấy danh sách trận đấu THẬT đang mở trên sảnh Saba của Viva88 (kèm tra cứu FT cho các vé vắt qua ngày mới)
+            running_match_ids = [t.match_id for t in risk_mgr.tickets if t.status.value == "RUNNING"]
+            viva_lines = await viva_client.fetch_viva88_lines(tick=tick, running_match_ids=running_match_ids)
             if stop_event.is_set():
                 break
             saba_matches = list(viva_client.live_match_map.values())

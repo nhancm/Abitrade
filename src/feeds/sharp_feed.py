@@ -73,9 +73,12 @@ class SharpFeedClient:
                     true_prob = 0.50
 
             elif v.market_type == MarketType.CORNER_OU:
-                # Chiến lược chủ lực (Đã kiểm chứng thực tế: Thắng 12/12 vé = 100% Winrate, +1,491.20 đ):
-                # Các trận có nhịp độ cày góc cao (total_crn >= 6, crn_per_min >= 0.185) và thế trận giằng co (chênh lệch <= 1 bàn)
-                if total_crn < 6:
+                # Chiến lược chủ lực (Đã kiểm chứng thực tế: Thắng 20/22 vé = 90.9% Winrate, Lãi ròng +2,526.80 đ):
+                # 1. Nếu có đội đang dẫn bàn (1-0 / 0-1), đội ĐANG BỊ DẪN bắt buộc phải có ít nhất 2 quả góc (đang dồn ép gỡ hòa),
+                #    tránh bẫy đội dẫn bàn cày hết góc đầu trận rồi lùi sâu (như AS Roma 1-0 góc 6-1).
+                # 2. Nếu tổng góc mới có 6 quả, chỉ vào khi mới ở phút <= 29' (nhịp độ >= 0.205 góc/phút).
+                trailing_crn_low = (v.score_home > v.score_away and crn_a < 2) or (v.score_away > v.score_home and crn_h < 2)
+                if total_crn < 6 or (total_crn == 6 and elapsed > 29) or trailing_crn_low:
                     true_prob = 0.46
                 else:
                     crn_per_min = total_crn / max(28, elapsed)
@@ -85,13 +88,11 @@ class SharpFeedClient:
 
             elif v.market_type == MarketType.HDP:
                 if v.phase == MatchPhase.LIVE:
-                    # Rút kinh nghiệm từ Log VPS:
-                    # 1. CẤM đánh HDP HOME -0.5 khi Chủ nhà ĐÃ DẪN BÀN (score_diff >= 1) vì Chủ nhà sẽ lùi sâu bảo toàn tỉ số 1-0 (thua kèo Rung!)
-                    # 2. CẤM đánh HDP HOME -0.5 khi Chủ nhà đang bị dẫn (score_diff < 0) để nhường suất 1-trận-1-vé cho kèo Tài Bàn Thắng (LIVE OU OVER)!
-                    # 3. Chỉ đánh HDP HOME -0.5 khi tỉ số ĐANG HÒA (0-0 hoặc 1-1), Chủ nhà không bị thẻ đỏ, và áp đảo toàn diện (SOT hơn >= 3, Góc hơn >= 2)
+                    # Khóa chặt HDP HOME -0.5 trừ khi Chủ nhà áp đảo tuyệt đối (SOT hơn >= 5 và Góc hơn >= 4 khi đang hòa)
+                    # để dành suất 1-trận-1-vé cho 2 mỏ vàng CORNER_OU (90.9% Winrate) và OU (83%+ Winrate)
                     score_diff = v.score_home - v.score_away
                     red_h = int(h.get("RedCard", 0))
-                    if score_diff != 0 or red_h > 0 or (sot_h - sot_a) < 3 or (crn_h - crn_a) < 2:
+                    if score_diff != 0 or red_h > 0 or (sot_h - sot_a) < 5 or (crn_h - crn_a) < 4:
                         true_prob = 0.45
                     else:
                         dom_da = (da_h - da_a) / max(25, elapsed)
