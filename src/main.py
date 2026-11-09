@@ -55,6 +55,8 @@ def load_config(path: str = "config/settings.yaml", secrets_path: str = "config/
             secrets = yaml.safe_load(sf) or {}
             if "viva88" in secrets:
                 cfg.setdefault("viva88", {}).update(secrets["viva88"])
+            if "accounts" in secrets:
+                cfg["accounts"] = secrets["accounts"]
     return cfg
 
 
@@ -122,13 +124,15 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
 
     console.print(
         Panel.fit(
-            f"[bold cyan]HỆ THỐNG AUTOBET 1 CỬA VIVA88 — DỮ LIỆU TRẬN ĐẤU THỰC TẾ SABA SPORTS[/bold cyan]\n"
-            f"• Tài khoản Viva88: [bold yellow]{viva_client.logged_in_user}[/bold yellow] (Session: [green]{viva_client.session_token}[/green])\n"
+            f"[bold cyan]HỆ THỐNG AUTOBET 1 CỬA BONG88 / VIVA88 — DỮ LIỆU TRẬN ĐẤU THỰC TẾ SABA SPORTS[/bold cyan]\n"
+            f"• Tài khoản: [bold yellow]{viva_client.logged_in_user}[/bold yellow] | Domain: [bold cyan]{viva_client.base_url}[/bold cyan] "
+            f"| Proxy: [green]{viva_client.proxy_exit_ip}[/green] (Ping: [bold]{viva_client.last_ping_ms:.0f}ms[/bold])\n"
             f"• Số dư khả dụng: [bold green]{init_stats['available_bankroll']:,.2f}[/bold green] "
-            f"(Đang treo RUNNING: [yellow]{init_stats['running_count']} vé / {init_stats['running_stake']:,.0f}[/yellow])\n"
-            f"• Điều kiện nổ kèo: [yellow]Winrate thực >= {cfg['strategy']['min_win_prob']*100:.0f}%[/yellow] & "
+            f"(Đang treo RUNNING: [yellow]{init_stats['running_count']} vé / {init_stats['running_stake']:,.0f}[/yellow] "
+            f"| Cắt lỗ tự động: [red]-{risk_mgr.daily_stop_loss_pct:.0f}%[/red])\n"
+            f"• Điều kiện nổ kèo: [yellow]Winrate thực >= {cfg['strategy']['min_win_prob']*100:.1f}%[/yellow] & "
             f"[yellow]+EV >= {cfg['strategy']['min_ev_percent']}%[/yellow] (Chỉ đánh 1 cửa / Không bù kèo)\n"
-            f"• Cơ chế kết toán: [bold green]Theo dõi tỉ số & phạt góc thực tế trên Viva88 — Chỉ chốt tiền khi trận đấu FT (hoặc nổ đủ Tài sớm)[/bold green]\n"
+            f"• Cơ chế kết toán: [bold green]Theo dõi tỉ số & phạt góc thực tế trên Bong88/Viva88 — Chỉ chốt tiền khi trận đấu FT (hoặc nổ đủ Tài sớm)[/bold green]\n"
             f"• Nhấn [bold red]Ctrl + C[/bold red] bất cứ lúc nào để dừng và xem bảng chi tiết.",
             border_style="cyan",
         )

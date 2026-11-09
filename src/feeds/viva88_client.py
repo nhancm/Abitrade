@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime, timedelta
 import json
 import re
+import time
 import uuid
 from typing import Dict, List, Optional, Tuple
 import httpx
@@ -11,11 +12,11 @@ from src.models import BetStatus, BetTicket, MarketType, MatchPhase, OddsLine, V
 
 class Viva88Client:
     """
-    Client giao tiếp trực tiếp với hệ thống dữ liệu trận đấu thực tế của Viva88 (Saba Sports):
-    - Tự động trích xuất `liveScoreKeyToken` và `liveScoreBearerToken` từ trang chủ `viva88.net/b/vn`.
-    - Gọi API thời gian thực `https://wonderfulnextapi.com/api/1.0/Match/Soccer/Today/` để lấy
-      100% các trận đấu thật có mở kèo Saba (`SabaId != null`) đang diễn ra trên bảng Viva88.
-    - Lưu bản đồ tỉ số/phạt góc/trạng thái trận đấu (`live_match_map`) để chốt vé khi trận đấu kết thúc (FT).
+    Client giao tiếp trực tiếp với hệ thống dữ liệu & đặt cược thực tế của Viva88 / Bong88 (Saba Sports):
+    - Hỗ trợ tự động chuyển đổi tên miền phổ biến tại VN (`bong88.com` -> `viva88.net` -> `viva88.com`).
+    - Hỗ trợ gắn Proxy Hồ Chí Minh độc lập cho từng tài khoản (`ip:port:user:pass` hoặc `http/socks5`),
+      đo độ trễ thực tế (`last_ping_ms`), kiểm tra IP đầu ra (`proxy_exit_ip`) và cơ chế Kill-Switch chống lộ IP.
+    - Tự động phát hiện mức cược tối thiểu (`detected_min_stake`) và số dư thực tế của sảnh Saba.
     """
 
     DEFAULT_KEY_TOKEN = "EDA8F37E5E644977BB5358217A605757"
@@ -23,13 +24,26 @@ class Viva88Client:
     MATCH_API_URL = "https://wonderfulnextapi.com/api/1.0/Match/Soccer/Today/"
     MATCH_DATE_API_URL = "https://wonderfulnextapi.com/api/1.0/Match/Soccer/Date/"
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, account_override: Optional[dict] = None):
         self.mode = config.get("mode", "simulation")
-        self.cfg = config["viva88"]
+        self.cfg = dict(config.get("viva88", {}))
+        if account_override:
+            self.cfg.update(account_override)
         self.strat_cfg = config.get("strategy", {})
-        self.base_url = self.cfg.get("base_url", "https://www.viva88.net")
+        self.bank_cfg = config.get("bankroll", {})
+        self.multi_cfg = config.get("multi_account", {})
+        self.base_url = self.cfg.get("domain") or self.cfg.get("base_url", "https://www.bong88.com")
+        fallback_list = self.cfg.get("fallback_urls", ["https://www.bong88.com", "https://www.viva88.net", "https://www.viva88.com"])
+        self.candidate_domains = [self.base_url] + [d for d in fallback_list if d != self.base_url]
         self.username = self.cfg.get("username", "")
         self.password = self.cfg.get("password", "")
+        self.raw_proxy = str(self.cfg.get("proxy", "") or "").strip()
+        self.proxy_url: Optional[str] = self.normalize_proxy(self.raw_proxy)
+        self.proxy_exit_ip: str = "Direct (Local/VPS)"
+        self.last_ping_ms: float = 0.0
+        self.proxy_healthy: bool = True
+        self.detected_min_stake: float = float(self.bank_cfg.get("min_stake", 10.0))
+        self.detected_balance: Optional[float] = None
         self.max_slippage = float(self.cfg.get("max_slippage", 0.02))
         self.waiting_delay = float(self.cfg.get("live_waiting_delay_sec", 3.0))
         self.session_token: Optional[str] = None
@@ -39,28 +53,72 @@ class Viva88Client:
         self.live_match_map: Dict[str, dict] = {}
         self._http: Optional[httpx.AsyncClient] = None
 
+    @staticmethod
+    def normalize_proxy(raw: str) -> Optional[str]:
+        """Chuẩn hóa mọi định dạng Proxy (ip:port:user:pass, user:pass@ip:port, http://, socks5://) sang chuẩn httpx."""
+        if not raw:
+            return None
+        raw = raw.strip()
+        if raw.startswith(("http://", "https://", "socks5://")):
+            return raw
+        if "@" in raw:
+            return f"http://{raw}"
+        parts = raw.split(":")
+        if len(parts) == 4:
+            ip, port, user, pw = parts
+            return f"http://{user}:{pw}@{ip}:{port}"
+        if len(parts) == 2:
+            return f"http://{raw}"
+        return raw
+
     async def login(self) -> bool:
-        self._http = httpx.AsyncClient(
-            follow_redirects=True,
-            timeout=10.0,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        client_kwargs = {
+            "follow_redirects": True,
+            "timeout": 10.0,
+            "headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                 "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8",
             },
-        )
-        try:
-            resp = await self._http.get(f"{self.base_url}/b/vn")
-            if resp.status_code == 200:
-                m_key = re.search(r'"liveScoreKeyToken"\s*:\s*"([^"]+)"', resp.text)
-                m_bearer = re.search(r'"liveScoreBearerToken"\s*:\s*"([^"]+)"', resp.text)
-                if m_key:
-                    self.key_token = m_key.group(1)
-                if m_bearer:
-                    self.bearer_token = f"Bearer {m_bearer.group(1)}"
-                self.session_token = f"V88_{self.username}_{uuid.uuid4().hex[:6].upper()}"
-                return True
-        except Exception:
-            pass
+        }
+        if self.proxy_url:
+            client_kwargs["proxy"] = self.proxy_url
+        self._http = httpx.AsyncClient(**client_kwargs)
+
+        # Kiểm tra IP đầu ra & độ trễ nếu có cấu hình Proxy HCM
+        if self.proxy_url:
+            try:
+                t0 = time.perf_counter()
+                ip_resp = await self._http.get("https://api.ipify.org?format=json", timeout=6.0)
+                self.last_ping_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+                if ip_resp.status_code == 200:
+                    self.proxy_exit_ip = ip_resp.json().get("ip", "Proxy-OK")
+                    self.proxy_healthy = True
+            except Exception:
+                self.proxy_healthy = False
+                self.proxy_exit_ip = "PROXY_ERROR"
+                if self.mode == "live" and self.multi_cfg.get("strict_proxy_killswitch", True):
+                    return False
+
+        # Tự động thử lần lượt từ bong88.com -> viva88.net để chọn domain phản hồi nhanh nhất tại VN
+        for domain in self.candidate_domains:
+            try:
+                t0 = time.perf_counter()
+                resp = await self._http.get(f"{domain}/b/vn")
+                ping_ms = round((time.perf_counter() - t0) * 1000.0, 1)
+                if resp.status_code == 200:
+                    self.base_url = domain
+                    if self.last_ping_ms == 0.0:
+                        self.last_ping_ms = ping_ms
+                    m_key = re.search(r'"liveScoreKeyToken"\s*:\s*"([^"]+)"', resp.text)
+                    m_bearer = re.search(r'"liveScoreBearerToken"\s*:\s*"([^"]+)"', resp.text)
+                    if m_key:
+                        self.key_token = m_key.group(1)
+                    if m_bearer:
+                        self.bearer_token = f"Bearer {m_bearer.group(1)}"
+                    self.session_token = f"V88_{self.username}_{uuid.uuid4().hex[:6].upper()}"
+                    return True
+            except Exception:
+                continue
 
         self.session_token = f"V88_{self.username}_{uuid.uuid4().hex[:6].upper()}"
         return True

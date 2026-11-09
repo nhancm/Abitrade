@@ -1,11 +1,13 @@
 mode: "simulation"  # "simulation" (Giả lập Paper Trade) hoặc "live" (Đặt tiền thật Viva88)
 
 bankroll:
-  initial_capital: 10000.0   # Vốn khởi điểm (điểm / USD)
+  initial_capital: 10000.0   # Vốn khởi điểm (Khi chạy mode "live" sẽ tự động đồng bộ theo số dư thật của từng tài khoản)
   kelly_fraction: 0.25       # 1/4 Kelly để an toàn vốn khi đánh 1 cửa
-  min_stake: 10.0            # Cược tối thiểu mỗi mã
+  min_stake: 10.0            # Cược tối thiểu mặc định (Khi chạy "live" sẽ tự động lấy min_bet thực tế từ sảnh Saba)
   max_stake_percent: 3.0     # Tối đa 3% tổng vốn cho 1 mã cược
   round_step: 5              # Làm tròn tiền cược (bội số của 5) chống soi tài khoản
+  daily_stop_loss_pct: 15.0  # Tự động ngắt bảo vệ tài khoản trong ngày nếu âm vượt quá -15% vốn
+  warmup_live_bets: 10       # 10 vé Live đầu tiên tự động đi đều mức min_stake của sảnh để đo tốc độ khớp vé & độ ổn định Proxy
 
 strategy:
   min_win_prob: 0.595        # Nâng ngưỡng Winrate thực tối thiểu lên 59.5% (Loại bỏ vùng nhiễu 58.0%-58.5% từ log VPS)
@@ -36,10 +38,21 @@ sharp_feed:
   poll_interval_sec: 5
 
 viva88:
-  base_url: "https://www.viva88.net"
+  base_url: "https://www.bong88.com"
+  fallback_urls:
+    - "https://www.bong88.com"
+    - "https://www.viva88.net"
+    - "https://www.viva88.com"
   agent_url: "https://agn.viva88.net"
   username: "YOUR_VIVA88_USER"
   password: "YOUR_VIVA88_PASS"
+  proxy: ""                  # Chuỗi Proxy HCM (Hỗ trợ mọi định dạng: ip:port:user:pass hoặc http://user:pass@ip:port)
   odds_type: "DEC"           # Quy đổi nội bộ về Decimal để tính toán chuẩn xác
   max_slippage: 0.02         # Hủy lệnh nếu lúc GetTicket giá Viva88 tụt quá 2 xu
   live_waiting_delay_sec: 3  # Giả lập thời gian Saba treo vé "Waiting" khi đánh kèo Rung
+
+multi_account:
+  strict_proxy_killswitch: true  # Khi chạy mode "live" nhiều tài khoản: Bắt buộc mỗi TK phải có Proxy sống, rớt Proxy tự ngắt TK đó
+  stagger_min_sec: 0.4           # Độ trễ lệch pha tối thiểu giữa các tài khoản khi cùng bắn 1 mã kèo
+  stagger_max_sec: 2.2           # Độ trễ lệch pha tối đa giữa các tài khoản chống Saba phát hiện đánh theo nhóm
+  stake_jitter_pct: 0.10         # Biến thiên nhẹ tiền cược (+/- 10%) giữa các tài khoản

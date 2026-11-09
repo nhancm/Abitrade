@@ -21,6 +21,8 @@ class RiskManager:
         self.one_shot_only = config["strategy"].get("one_shot_per_market", True)
         self.one_bet_per_match = config["strategy"].get("one_bet_per_match", True)
         self.max_running_tickets = int(config["strategy"].get("max_running_tickets", 10))
+        self.daily_stop_loss_pct = float(config["bankroll"].get("daily_stop_loss_pct", 15.0))
+        self.warmup_live_bets = int(config["bankroll"].get("warmup_live_bets", 10))
         self.ledger_path = ledger_path
         self.locked_markets: Set[str] = set()
         self.tickets: List[BetTicket] = []
@@ -128,7 +130,15 @@ class RiskManager:
         running_now = sum(1 for t in self.tickets if t.status == BetStatus.RUNNING)
         return running_now >= self.max_running_tickets
 
+    def is_stop_loss_hit(self) -> bool:
+        """Tự động ngắt bảo vệ tài khoản nếu âm vượt quá ngưỡng daily_stop_loss_pct (-15% vốn gốc)."""
+        total_pnl = sum(t.pnl for t in self.tickets if t.status != BetStatus.RUNNING)
+        max_loss_amount = -(self.initial_capital * (self.daily_stop_loss_pct / 100.0))
+        return total_pnl <= max_loss_amount
+
     def can_place_bet(self, signal: ValueSignal) -> bool:
+        if self.is_stop_loss_hit():
+            return False
         if self.is_max_running_reached():
             return False
         if self.is_match_locked(signal):
