@@ -52,6 +52,7 @@ class Viva88Client:
         self.bearer_token: str = self.DEFAULT_BEARER
         self.live_match_map: Dict[str, dict] = {}
         self._http: Optional[httpx.AsyncClient] = None
+        self._scanner_http: Optional[httpx.AsyncClient] = None
 
     @staticmethod
     def normalize_proxy(raw: str) -> Optional[str]:
@@ -83,13 +84,17 @@ class Viva88Client:
         if self.proxy_url:
             client_kwargs["proxy"] = self.proxy_url
         self._http = httpx.AsyncClient(**client_kwargs)
+        # Luồng Master Scanner tách biệt (không đốt băng thông Proxy HCM khi quét bảng kèo mỗi 5s)
+        self._scanner_http = httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=10.0,
+            headers=client_kwargs["headers"],
+        )
 
         # Kiểm tra IP đầu ra & độ trễ nếu có cấu hình Proxy HCM
         if self.proxy_url:
             try:
-                t0 = time.perf_counter()
                 ip_resp = await self._http.get("https://api.ipify.org?format=json", timeout=6.0)
-                self.last_ping_ms = round((time.perf_counter() - t0) * 1000.0, 1)
                 if ip_resp.status_code == 200:
                     self.proxy_exit_ip = ip_resp.json().get("ip", "Proxy-OK")
                     self.proxy_healthy = True
@@ -107,8 +112,7 @@ class Viva88Client:
                 ping_ms = round((time.perf_counter() - t0) * 1000.0, 1)
                 if resp.status_code == 200:
                     self.base_url = domain
-                    if self.last_ping_ms == 0.0:
-                        self.last_ping_ms = ping_ms
+                    self.last_ping_ms = ping_ms
                     m_key = re.search(r'"liveScoreKeyToken"\s*:\s*"([^"]+)"', resp.text)
                     m_bearer = re.search(r'"liveScoreBearerToken"\s*:\s*"([^"]+)"', resp.text)
                     if m_key:
@@ -124,16 +128,18 @@ class Viva88Client:
         return True
 
     async def close(self) -> None:
-        if self._http is not None:
-            try:
-                await self._http.aclose()
-            except Exception:
-                pass
-            self._http = None
+        for cli in (self._http, self._scanner_http):
+            if cli is not None:
+                try:
+                    await cli.aclose()
+                except Exception:
+                    pass
+        self._http = None
+        self._scanner_http = None
 
     async def fetch_real_saba_matches(self, running_match_ids: Optional[List[str]] = None) -> List[dict]:
         """Lấy toàn bộ danh sách trận đấu thực tế có trên sảnh Saba của Viva88 hôm nay (kèm tra cứu FT ngày cũ nếu vé vắt qua 11h trưa)."""
-        if not self._http:
+        if not self._scanner_http:
             await self.login()
         headers = {
             "Content-Type": "application/json",
@@ -143,7 +149,7 @@ class Viva88Client:
             "Referer": f"{self.base_url}/",
         }
         try:
-            resp = await self._http.post(self.MATCH_API_URL, headers=headers, json={})
+            resp = await self._scanner_http.post(self.MATCH_API_URL, headers=headers, json={})
             if resp.status_code == 200:
                 data = resp.json()
                 all_matches = data.get("Result", {}).get("Match", [])
@@ -156,7 +162,7 @@ class Viva88Client:
                     missing_ids = [mid for mid in running_match_ids if mid not in self.live_match_map]
                     if missing_ids:
                         yest_str = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-                        r_date = await self._http.post(self.MATCH_DATE_API_URL, headers=headers, json={"Date": yest_str})
+                        r_date = await self._scanner_http.post(self.MATCH_DATE_API_URL, headers=headers, json={"Date": yest_str})
                         if r_date.status_code == 200:
                             old_matches = r_date.json().get("Result", {}).get("Match", [])
                             for om in old_matches:
