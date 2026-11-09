@@ -51,6 +51,8 @@ class Viva88Client:
         self.key_token: str = self.DEFAULT_KEY_TOKEN
         self.bearer_token: str = self.DEFAULT_BEARER
         self.live_match_map: Dict[str, dict] = {}
+        self.access_token: Optional[str] = None
+        self.sportsbook_domain: str = "https://d.bong88.com"
         self._http: Optional[httpx.AsyncClient] = None
         self._scanner_http: Optional[httpx.AsyncClient] = None
 
@@ -71,6 +73,102 @@ class Viva88Client:
         if len(parts) == 2:
             return f"http://{raw}"
         return raw
+
+    def _encrypt_passwords(self, raw_pw: str, mkey: str, ekey: str) -> Tuple[str, str]:
+        """Thuật toán mã hóa mật khẩu chuẩn theo Next.js bundle của Bong88 / Viva88."""
+        import os
+        # 1. Custom hash a(password)
+        e_pw = raw_pw + '\x15' * (30 - len(raw_pw)) if (30 - len(raw_pw)) > 1 else raw_pw
+        t_val = 1.0
+        for a_idx in range(1, 31):
+            t_val *= 30 + ord(e_pw[a_idx - 1]) * a_idx
+        e_str = f"{t_val:.14E}".replace('+', '')
+        i_str = ''.join(hex(int(''.join(str(ord(ch)) for ch in e_str[k - 1:k + 2])))[2:] for k in range(1, len(e_str) + 1))
+        hashed_pw = ''.join(i_str[k - 1] for k in range(20, len(i_str) - 17, 2)).upper()
+
+        # 2. RSA PKCS#1 v1.5 encryption
+        n_int = int(mkey, 16)
+        e_int = int(ekey, 16)
+        k_len = (n_int.bit_length() + 7) // 8
+        m_bytes = raw_pw.encode('utf-8')
+        ps = os.urandom(k_len - len(m_bytes) - 3).replace(b'\x00', b'\x01')
+        blk = b'\x00\x02' + ps + b'\x00' + m_bytes
+        rsa_pw = pow(int.from_bytes(blk, 'big'), e_int, n_int).to_bytes(k_len, 'big').hex().upper()
+        return hashed_pw, rsa_pw
+
+    async def authenticate_member_session(self) -> bool:
+        """Đăng nhập lấy AccessToken và Session đặt cược của sảnh thể thao (Sportsbook) qua Proxy HCM."""
+        if not self._http:
+            await self.login()
+        if not self.username or not self.password:
+            return False
+
+        try:
+            # Lấy rsaPublicKey từ trang chủ
+            resp_home = await self._http.get(f"{self.base_url}/b/vn")
+            if resp_home.status_code != 200:
+                return False
+
+            idx = resp_home.text.find("__NEXT_DATA__")
+            if idx == -1:
+                return False
+            s = resp_home.text[idx:]
+            raw_json = s[s.find(">") + 1 : s.find("</script>")]
+            data_next = json.loads(raw_json)
+            page_props = data_next.get("props", {}).get("pageProps", {})
+            rsa_info = page_props.get("rsaPublicKey", {})
+            mkey = rsa_info.get("mkey") or rsa_info.get("MKEY")
+            ekey = rsa_info.get("ekey") or rsa_info.get("EKEY")
+            client_api_url = page_props.get("clientApiUrl", "https://api.bong88.com")
+
+            if not mkey or not ekey:
+                return False
+
+            hashed_pw, rsa_pw = self._encrypt_passwords(self.password, mkey, ekey)
+            login_payload = {
+                "username": self.username,
+                "password": hashed_pw,
+                "rsaPassword": rsa_pw,
+                "isGesture": False,
+                "platform": "desktop",
+                "language": "vn",
+                "loginGuid": "",
+                "loginCode": "",
+            }
+
+            resp_login = await self._http.post(
+                f"{client_api_url}/api/Login",
+                json=login_payload,
+                headers={"Origin": self.base_url, "Referer": f"{self.base_url}/"},
+            )
+            login_data = resp_login.json()
+            if login_data.get("errorCode") != 0 or not login_data.get("redirectUrl"):
+                return False
+
+            # Follow redirectUrl đến d.bong88.com để nhận cookie và trích xuất AccessToken
+            redir_url = login_data["redirectUrl"]
+            resp_sb = await self._http.get(redir_url)
+            if resp_sb.status_code != 200:
+                return False
+
+            m_at = re.search(r'MS2\.at\s*=\s*["\']([^"\']+)["\']', resp_sb.text)
+            if m_at:
+                self.access_token = m_at.group(1)
+
+            m_bcredit = re.search(r'"BCredit"\s*:\s*["\']([0-9.,]+)["\']', resp_sb.text)
+            if m_bcredit:
+                try:
+                    self.detected_balance = float(m_bcredit.group(1).replace(",", ""))
+                except Exception:
+                    pass
+
+            m_domain = re.search(r'https?://[a-zA-Z0-9.-]*bong88\.com', str(resp_sb.url))
+            if m_domain:
+                self.sportsbook_domain = m_domain.group(0)
+
+            return bool(self.access_token)
+        except Exception:
+            return False
 
     async def login(self) -> bool:
         client_kwargs = {
@@ -120,11 +218,17 @@ class Viva88Client:
                     if m_bearer:
                         self.bearer_token = f"Bearer {m_bearer.group(1)}"
                     self.session_token = f"V88_{self.username}_{uuid.uuid4().hex[:6].upper()}"
+                    if self.mode == "live":
+                        auth_ok = await self.authenticate_member_session()
+                        if not auth_ok and self.multi_cfg.get("strict_proxy_killswitch", True):
+                            return False
                     return True
             except Exception:
                 continue
 
         self.session_token = f"V88_{self.username}_{uuid.uuid4().hex[:6].upper()}"
+        if self.mode == "live":
+            await self.authenticate_member_session()
         return True
 
     async def close(self) -> None:
@@ -348,7 +452,40 @@ class Viva88Client:
         return lines
 
     async def get_ticket_quote(self, signal: ValueSignal) -> Tuple[bool, float, float]:
-        await asyncio.sleep(0.05)
+        """Lấy báo giá trực tiếp từ sảnh thể thao Bong88 (qua Proxy HCM) hoặc giả lập tốc độ cao."""
+        if self.mode != "live" or not self.access_token or not self._http:
+            await asyncio.sleep(0.05)
+            return True, signal.viva88_odds, 2000.0
+
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+            "Referer": f"{self.sportsbook_domain}/",
+            "Origin": self.sportsbook_domain,
+        }
+        try:
+            req_data = {
+                "ItemList": [{
+                    "Oddsid": str(signal.saba_id),
+                    "Betteam": "h" if signal.side == "HOME" or signal.side == "OVER" else "a",
+                    "Sporttype": 1,
+                    "OddsType": 4,  # Decimal
+                }],
+                "GMT": 7,
+            }
+            resp = await self._http.post(f"{self.sportsbook_domain}/Betting/GetTickets", headers=headers, json=req_data, timeout=5.0)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                t_list = res_json.get("Data", {}).get("Tickets", [])
+                if t_list:
+                    ticket_info = t_list[0]
+                    live_odds = float(ticket_info.get("DisplayOdds", signal.viva88_odds))
+                    max_stake = float(ticket_info.get("MaxBet", 2000.0))
+                    min_stake = float(ticket_info.get("MinBet", 3.0))
+                    self.detected_min_stake = min_stake
+                    return True, live_odds, max_stake
+        except Exception:
+            pass
         return True, signal.viva88_odds, 2000.0
 
     async def place_single_bet(self, signal: ValueSignal) -> BetTicket:
@@ -391,6 +528,90 @@ class Viva88Client:
             )
 
         final_stake = min(signal.recommended_stake, max_bet)
+
+        # XỬ LÝ ĐẶT CƯỢC THẬT KHI CHẠY MODE "LIVE":
+        if self.mode == "live" and self.access_token and self._http:
+            headers = {
+                "Authorization": f"Bearer {self.access_token}",
+                "Content-Type": "application/json",
+                "Referer": f"{self.sportsbook_domain}/",
+                "Origin": self.sportsbook_domain,
+            }
+            bet_payload = {
+                "BetType": "single",
+                "ItemList": [{
+                    "Oddsid": str(signal.saba_id),
+                    "Betteam": "h" if signal.side == "HOME" or signal.side == "OVER" else "a",
+                    "Sporttype": 1,
+                    "Stake": final_stake,
+                    "Odds": live_quote_odds,
+                    "AcceptBetterOdds": True,
+                }],
+                "AutoAccept": True,
+            }
+            try:
+                bet_resp = await self._http.post(f"{self.sportsbook_domain}/Betting/ProcessBet", headers=headers, json=bet_payload, timeout=8.0)
+                if bet_resp.status_code == 200:
+                    bet_data = bet_resp.json()
+                    err = bet_data.get("ErrorCode", 0)
+                    if err == 0:
+                        real_ticket_ref = bet_data.get("Data", {}).get("TicketId") or ticket_id
+                        note = f"LIVE THỰC CHIẾN (Đã khớp vé Saba: {real_ticket_ref})"
+                        return BetTicket(
+                            ticket_id=str(real_ticket_ref),
+                            match_id=signal.match_id,
+                            saba_id=signal.saba_id,
+                            match_key=signal.match_key,
+                            league=signal.league,
+                            match_name=match_name,
+                            phase=signal.phase,
+                            market_type=signal.market_type,
+                            line=signal.line,
+                            side=signal.side,
+                            selection=selection,
+                            odds_requested=signal.viva88_odds,
+                            odds_accepted=live_quote_odds,
+                            true_win_prob=signal.true_win_prob,
+                            ev_percent=signal.ev_percent,
+                            stake=final_stake,
+                            status=BetStatus.RUNNING,
+                            score_at_bet=score_str,
+                            current_score=score_str,
+                            current_corners=corners_str,
+                            current_minute=signal.minute,
+                            is_simulation=False,
+                            note=note,
+                        )
+                    else:
+                        msg = bet_data.get("ErrorMessage") or f"Code {err}"
+                        return BetTicket(
+                            ticket_id=ticket_id,
+                            match_id=signal.match_id,
+                            saba_id=signal.saba_id,
+                            match_key=signal.match_key,
+                            league=signal.league,
+                            match_name=match_name,
+                            phase=signal.phase,
+                            market_type=signal.market_type,
+                            line=signal.line,
+                            side=signal.side,
+                            selection=selection,
+                            odds_requested=signal.viva88_odds,
+                            odds_accepted=live_quote_odds,
+                            true_win_prob=signal.true_win_prob,
+                            ev_percent=signal.ev_percent,
+                            stake=0.0,
+                            status=BetStatus.REJECTED,
+                            score_at_bet=score_str,
+                            current_score=score_str,
+                            current_corners=corners_str,
+                            current_minute=signal.minute,
+                            is_simulation=False,
+                            note=f"Nhà cái từ chối vé ({msg})",
+                        )
+            except Exception as e:
+                pass
+
         if signal.phase == MatchPhase.LIVE and self.mode == "simulation":
             await asyncio.sleep(0.15)
             note = f"Đang chạy (Đã duyệt sau {int(self.waiting_delay)}s Waiting - {signal.signal_type})"

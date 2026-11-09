@@ -116,16 +116,21 @@ async def run_continuous_bot(max_cycles: int = 0) -> None:
     risk_mgr = RiskManager(cfg)
 
     await viva_client.login()
+    if cfg.get("mode") == "live" and viva_client.detected_balance is not None:
+        risk_mgr.bankroll = viva_client.detected_balance
+        risk_mgr.initial_capital = viva_client.detected_balance
+
     init_stats = risk_mgr.get_portfolio_stats()
     logger.info(
         f"START REALTIME BOT | mode={cfg['mode']} | account={viva_client.logged_in_user} | "
         f"session={viva_client.session_token} | available_bankroll={init_stats['available_bankroll']:.2f}"
     )
 
+    mode_badge = "[bold red]● LIVE (TIỀN THẬT SẢNH SABA)[/bold red]" if cfg.get("mode") == "live" else "[bold green]○ SIMULATION (GIẢ LẬP)[/bold green]"
     console.print(
         Panel.fit(
             f"[bold cyan]HỆ THỐNG AUTOBET 1 CỬA BONG88 / VIVA88 — DỮ LIỆU TRẬN ĐẤU THỰC TẾ SABA SPORTS[/bold cyan]\n"
-            f"• Tài khoản: [bold yellow]{viva_client.logged_in_user}[/bold yellow] | Domain: [bold cyan]{viva_client.base_url}[/bold cyan] "
+            f"• Chế độ: {mode_badge} | Tài khoản: [bold yellow]{viva_client.logged_in_user}[/bold yellow] "
             f"| Proxy: [green]{viva_client.proxy_exit_ip}[/green] (Ping: [bold]{viva_client.last_ping_ms:.0f}ms[/bold])\n"
             f"• Số dư khả dụng: [bold green]{init_stats['available_bankroll']:,.2f}[/bold green] "
             f"(Đang treo RUNNING: [yellow]{init_stats['running_count']} vé / {init_stats['running_stake']:,.0f}[/yellow] "
